@@ -1,0 +1,358 @@
+.App {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1a2e;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #00d4aa;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #00a085;
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #00d4aa #1a1a2e;
+}
+
+/* Global animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -468px 0;
+  }
+  100% {
+    background-position: 468px 0;
+  }
+}
+
+/* Utility classes */
+.fade-in {
+  animation: fadeIn 0.6s ease-out;
+}
+
+.slide-in {
+  animation: slideIn 0.4s ease-out;
+}
+
+.pulse {
+  animation: pulse 2s infinite;
+}
+
+.shimmer {
+  animation-duration: 1.25s;
+  animation-fill-mode: forwards;
+  animation-iteration-count: infinite;
+  animation-name: shimmer;
+  animation-timing-function: linear;
+  background: linear-gradient(to right, #1a1a2e 8%, #2a2a3e 18%, #1a1a2e 33%);
+  background-size: 800px 104px;
+  position: relative;
+}
+
+/* Trading signal status indicators */
+.signal-buy {
+  color: #4caf50;
+  font-weight: bold;
+}
+
+.signal-sell {
+  color: #f44336;
+  font-weight: bold;
+}
+
+.signal-neutral {
+  color: #ff9800;
+  font-weight: bold;
+}
+
+/* Risk level indicators */
+.risk-low {
+  color: #4caf50;
+}
+
+.risk-medium {
+  color: #ff9800;
+}
+
+.risk-high {
+  color: #f44336;
+}
+
+/* Price movement indicators */
+.price-up {
+  color: #4caf50;
+}
+
+.price-down {
+  color: #f44336;
+}
+
+.price-neutral {
+  color: #9e9e9e;
+}
+
+/* Loading states */
+.loading-skeleton {
+  background: linear-gradient(90deg, #1a1a2e 25%, #2a2a3e 50%, #1a1a2e 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+/* Chart containers */
+.chart-container {
+  position: relative;
+  height: 400px;
+  width: 100%;
+}
+
+.chart-tooltip {
+  background: rgba(26, 26, 46, 0.95);
+  border: 1px solid #00d4aa;
+  border-radius: 8px;
+  padding: 12px;
+  color: white;
+  font-size: 14px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* Responsive design helpers */
+@media (max-width: 768px) {
+  .hide-mobile {
+    display: none !important;
+  }
+  
+  .chart-container {
+    height: 300px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chart-container {
+    height: 250px;
+  }
+}
+
+/* Custom button styles */
+.btn-primary {
+  background: linear-gradient(45deg, #00d4aa 30%, #00a085 90%);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  padding: 12px 24px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 212, 170, 0.3);
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 2px solid #00d4aa;
+  border-radius: 8px;
+  color: #00d4aa;
+  padding: 10px 22px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background: #00d4aa;
+  color: #1a1a2e;
+}
+
+/* Card hover effects */
+.card-hover {
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+/* Status badges */
+.status-active {
+  background: linear-gradient(45deg, #4caf50, #66bb6a);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-inactive {
+  background: linear-gradient(45deg, #9e9e9e, #bdbdbd);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-warning {
+  background: linear-gradient(45deg, #ff9800, #ffb74d);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Form styles */
+.form-container {
+  background: rgba(26, 26, 46, 0.8);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  padding: 32px;
+  border: 1px solid rgba(0, 212, 170, 0.2);
+}
+
+.form-input {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: white;
+  padding: 12px 16px;
+  width: 100%;
+  transition: all 0.3s ease;
+}
+
+.form-input:focus {
+  border-color: #00d4aa;
+  box-shadow: 0 0 0 2px rgba(0, 212, 170, 0.2);
+  outline: none;
+}
+
+/* Table styles */
+.data-table {
+  background: transparent;
+}
+
+.data-table th {
+  background: rgba(0, 212, 170, 0.1);
+  color: #00d4aa;
+  font-weight: 600;
+  border-bottom: 2px solid #00d4aa;
+}
+
+.data-table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.data-table tr:hover {
+  background: rgba(0, 212, 170, 0.05);
+}
+
+/* Notification styles */
+.notification-success {
+  background: linear-gradient(45deg, #4caf50, #66bb6a);
+}
+
+.notification-error {
+  background: linear-gradient(45deg, #f44336, #ef5350);
+}
+
+.notification-warning {
+  background: linear-gradient(45deg, #ff9800, #ffb74d);
+}
+
+.notification-info {
+  background: linear-gradient(45deg, #2196f3, #42a5f5);
+}
+
+/* Loading spinner */
+.spinner {
+  border: 4px solid rgba(0, 212, 170, 0.1);
+  border-left: 4px solid #00d4aa;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Glassmorphism effect */
+.glass {
+  background: rgba(26, 26, 46, 0.7);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(45deg, #00d4aa 30%, #ffffff 90%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Custom shadows */
+.shadow-glow {
+  box-shadow: 0 0 20px rgba(0, 212, 170, 0.3);
+}
+
+.shadow-soft {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.shadow-hard {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
