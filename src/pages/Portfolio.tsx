@@ -31,7 +31,6 @@ import {
   TrendingDown,
   Add,
   Edit,
-  Delete,
   AccountBalance,
   ShowChart,
   Assessment,
@@ -40,109 +39,142 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid, GridToolbar } from '@mui/x-data-grid';
 
-interface Position {
-  id: string;
-  symbol: string;
-  type: 'BUY' | 'SELL';
-  quantity: number;
-  entryPrice: number;
-  currentPrice: number;
-  market: string;
-  openDate: string;
-  pnl: number;
-  pnlPercentage: number;
-  status: 'open' | 'closed';
-}
-
 const ORIGINAL_BALANCE = 100000;
+
+// --- Recommendation: Move price fetchers to a utility file for production ---
+const fetchMultiMarketPrices = async (positions: any[]) => {
+  const prices: Record<string, number> = {};
+
+  // Group symbols by market
+  const cryptoSymbols = positions.filter(p => p.market === 'crypto').map(p => p.symbol);
+  const forexSymbols = positions.filter(p => p.market === 'forex').map(p => p.symbol);
+  const stockSymbols = positions.filter(p => p.market === 'stocks').map(p => p.symbol);
+  const commoditySymbols = positions.filter(p => p.market === 'commodities').map(p => p.symbol);
+
+  // --- Crypto (Binance) ---
+  for (const symbol of cryptoSymbols) {
+    try {
+      const res = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+      prices[symbol] = Number(res.data.price);
+    } catch {
+      prices[symbol] = NaN;
+    }
+  }
+
+  // --- Forex (exchangerate.host) ---
+  for (const symbol of forexSymbols) {
+    const base = symbol.slice(0, 3);
+    const quote = symbol.slice(3, 6);
+    try {
+      const res = await axios.get(`https://api.exchangerate.host/latest?base=${base}&symbols=${quote}`);
+      prices[symbol] = res.data.rates[quote];
+    } catch {
+      prices[symbol] = NaN;
+    }
+  }
+
+  // --- Stocks (Yahoo Finance unofficial) ---
+  for (const symbol of stockSymbols) {
+    try {
+      const res = await axios.get(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbol}`);
+      prices[symbol] = res.data.quoteResponse.result[0]?.regularMarketPrice;
+    } catch {
+      prices[symbol] = NaN;
+    }
+  }
+
+  // --- Commodities (exchangerate.host) ---
+  for (const symbol of commoditySymbols) {
+    const base = symbol.slice(0, 3);
+    const quote = symbol.slice(3, 6);
+    try {
+      const res = await axios.get(`https://api.exchangerate.host/latest?base=${base}&symbols=${quote}`);
+      prices[symbol] = res.data.rates[quote];
+    } catch {
+      prices[symbol] = NaN;
+    }
+  }
+
+  return prices;
+};
 
 const Portfolio: React.FC = () => {
   const theme = useTheme();
   const dispatch = useAppDispatch();
   const { positions = [], loading, error } = useAppSelector((state: any) => state.portfolio || {});
-
   const [openDialog, setOpenDialog] = useState(false);
-  const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
+  const [selectedPosition, setSelectedPosition] = useState<any>(null);
   const [newPosition, setNewPosition] = useState({
     symbol: '',
     type: 'BUY' as 'BUY' | 'SELL',
     quantity: '',
     entryPrice: '',
-    market: 'forex',
+    market: 'crypto',
   });
   const [demoAccount, setDemoAccount] = useState<any>(null);
   const [showPrompt, setShowPrompt] = useState(false);
-
-  // Add loading state for button
   const [accountActionLoading, setAccountActionLoading] = useState(false);
   const [accountError, setAccountError] = useState('');
   const [accountSuccess, setAccountSuccess] = useState('');
 
-  // Replace with your actual user ID logic
+  // --- Recommendation: Use your actual user ID logic here ---
   const userId = useAppSelector((state: any) => state.auth.user?._id || state.auth.user?.id);
 
-  console.log('User object:', useAppSelector((state: any) => state.auth.user));
-  console.log('User ID:', userId);
-
+  // Fetch account on mount
   useEffect(() => {
     if (userId) {
       axios.get(`/api/demo-account/${userId}`)
-        .then(res => {
-          setDemoAccount(res.data);
-          console.log('Fetched demo account:', res.data); // <--- Check this output!
-        })
+        .then(res => setDemoAccount(res.data))
         .catch(() => setShowPrompt(true));
     }
   }, [userId]);
 
-  // Create or reset demo account
-  const handleCreateOrResetDemo = async () => {
-    setAccountActionLoading(true);
-    setAccountError('');
-    setAccountSuccess('');
-    try {
-      if (!demoAccount) {
-        // Create new demo account
-        const res = await axios.post(`/api/demo-account/${userId}`);
-        setDemoAccount(res.data);
-        setAccountSuccess('Demo account created successfully!');
-      } else {
-        // Reset existing demo account (PATCH endpoint)
-        const res = await axios.patch(`/api/demo-account/${userId}/reset`, { balance: ORIGINAL_BALANCE });
-        setDemoAccount(res.data);
-        setAccountSuccess('Demo account reset successfully!');
-      }
-      setShowPrompt(false);
-    } catch (err: any) {
-      setAccountError(
-        err?.response?.data?.msg ||
-        'Failed to create/reset demo account. Please try again.'
-      );
-    }
-    setAccountActionLoading(false);
-  };
+  // Update currentPrice every 30s
+  useEffect(() => {
+    const updatePrices = async () => {
+      if (!demoAccount?.openPositions?.length) return;
+      const latestPrices = await fetchMultiMarketPrices(demoAccount.openPositions);
+      setDemoAccount((prev: any) => ({
+        ...prev,
+        openPositions: prev.openPositions.map((pos: any) => ({
+          ...pos,
+          currentPrice: latestPrices[pos.symbol] ?? pos.currentPrice,
+        })),
+      }));
+    };
+    updatePrices();
+    const interval = setInterval(updatePrices, 30000);
+    return () => clearInterval(interval);
+  }, [demoAccount?.openPositions?.length]);
 
-  // Use demoAccount.openPositions and demoAccount.tradeHistory instead of positions
-  const openPositions = demoAccount?.openPositions || [];
-  const closedPositions = demoAccount?.tradeHistory || [];
-
-  // Filter out invalid open positions and ensure each has an id
-  const validOpenPositions = (openPositions || []).filter(
-    (pos: any) =>
-      pos &&
-      typeof pos === 'object' &&
-      (pos._id || pos.id)
+  // Prepare open positions with P&L
+  const validOpenPositions = (demoAccount?.openPositions || []).filter(
+    (pos: any) => pos && typeof pos === 'object' && (pos._id || pos.id)
   );
-  const gridOpenPositions = validOpenPositions.map((row: any) => ({
-    ...row,
-    id: row.id || row._id,
-    type: row.type || row.direction || newPosition.type || 'BUY', // fallback
-    market: row.market || newPosition.market || (row.symbol?.toUpperCase().includes('USD') ? 'crypto' : 'forex'),
-    currentPrice: row.currentPrice ?? row.entryPrice,
-  }));
+  const gridOpenPositionsWithPnL = validOpenPositions.map((pos: any) => {
+    const entry = Number(pos.entryPrice) || 0;
+    const current = Number(pos.currentPrice ?? pos.entryPrice) || 0;
+    const qty = Number(pos.quantity) || 0;
+    const type = pos.type || pos.direction || 'BUY';
+    let pnl = 0;
+    if (type === 'BUY') pnl = (current - entry) * qty;
+    else if (type === 'SELL') pnl = (entry - current) * qty;
+    const invested = entry * qty;
+    const pnlPercentage = invested !== 0 ? (pnl / invested) * 100 : 0;
+    return {
+      ...pos,
+      id: pos.id || pos._id,
+      type,
+      market: pos.market || 'crypto',
+      currentPrice: current,
+      pnl,
+      pnlPercentage,
+    };
+  });
 
-  // Do the same for closed positions
-  const validClosedPositions = (closedPositions || []).filter(
+  // Prepare closed positions for history
+  const closedPositions = demoAccount?.tradeHistory || [];
+  const validClosedPositions = closedPositions.filter(
     (pos: any) => pos && typeof pos === 'object' && (pos._id || pos.id)
   );
   const gridClosedPositions = validClosedPositions.map((row: any) => ({
@@ -150,62 +182,7 @@ const Portfolio: React.FC = () => {
     id: row.id || row._id,
   }));
 
-  // Calculate P&L and P&L% for each open position
-  const gridOpenPositionsWithPnL = [
-    {
-      id: 'test',
-      symbol: 'TEST',
-      type: 'BUY',
-      quantity: 1,
-      entryPrice: 100,
-      currentPrice: 110,
-      market: 'forex',
-      pnl: 10,
-      pnlPercentage: 10,
-    },
-    ...gridOpenPositions.map((pos: any) => {
-      const entry = Number(pos.entryPrice) || 0;
-      const current = Number(pos.currentPrice ?? pos.entryPrice) || 0;
-      const qty = Number(pos.quantity) || 0;
-      const type = pos.type || pos.direction; // fallback
-      let pnl = 0;
-      if (type === 'BUY') {
-        pnl = (current - entry) * qty;
-      } else if (type === 'SELL') {
-        pnl = (entry - current) * qty;
-      }
-      const invested = entry * qty;
-      const pnlPercentage = invested !== 0 ? (pnl / invested) * 100 : 0;
-      console.log({
-        symbol: pos.symbol,
-        entry: entry,
-        current: current,
-        qty: qty,
-        type: pos.type,
-        pnl,
-        pnlPercentage
-      });
-      return {
-        ...pos,
-        pnl,
-        pnlPercentage,
-      };
-    }),
-  ];
-
-  console.log('Open positions:', gridOpenPositionsWithPnL);
-
-  // Portfolio statistics
-  const totalPnL = closedPositions.reduce((sum: number, pos: any) => sum + (pos.pnl || pos.profit || 0), 0);
-  const totalInvested = openPositions.reduce((sum: number, pos: any) => sum + (pos.quantity * pos.entryPrice), 0);
-  const totalValue = openPositions.reduce((sum: number, pos: any) => sum + (pos.quantity * (pos.currentPrice || pos.entryPrice)), 0);
-  const totalReturn = totalInvested > 0 ? ((totalValue - totalInvested) / totalInvested) * 100 : 0;
-
-  // Success Rate calculation
-  const totalClosed = closedPositions.length;
-  const totalWins = closedPositions.filter((pos: any) => (pos.pnl ?? pos.profit ?? 0) > 0).length;
-  const successRate = totalClosed > 0 ? (totalWins / totalClosed) * 100 : 0;
-
+  // Handlers
   const handleAddPosition = () => {
     setSelectedPosition(null);
     setNewPosition({
@@ -213,12 +190,11 @@ const Portfolio: React.FC = () => {
       type: 'BUY',
       quantity: '',
       entryPrice: '',
-      market: 'forex',
+      market: 'crypto',
     });
     setOpenDialog(true);
   };
-
-  const handleEditPosition = (position: Position) => {
+  const handleEditPosition = (position: any) => {
     setSelectedPosition(position);
     setNewPosition({
       symbol: position.symbol,
@@ -229,12 +205,10 @@ const Portfolio: React.FC = () => {
     });
     setOpenDialog(true);
   };
-
   const handleCloseDialog = () => {
     setOpenDialog(false);
     setSelectedPosition(null);
   };
-
   const handleSavePosition = async () => {
     try {
       const payload = {
@@ -243,11 +217,10 @@ const Portfolio: React.FC = () => {
         entryPrice: Number(newPosition.entryPrice),
         currentPrice: Number(newPosition.entryPrice),
         type: newPosition.type,
-        market: newPosition.market, // <-- this should be set!
+        market: newPosition.market,
         symbol: newPosition.symbol,
       };
       if (!selectedPosition) {
-        // Add new position
         const res = await axios.post(`/api/demo-account/${userId}/positions`, payload);
         setDemoAccount(res.data);
         setAccountSuccess('Position added successfully!');
@@ -255,36 +228,65 @@ const Portfolio: React.FC = () => {
         // Optionally handle edit/update here
       }
       handleCloseDialog();
-    } catch (err: any) {
+    } catch {
       setAccountError('Failed to save position.');
     }
   };
-
-  // Handler to close a single position
   const handleClosePosition = async (positionId: string) => {
     try {
       await axios.patch(`/api/demo-account/${userId}/positions/${positionId}/close`);
-      // Refresh account data
       const res = await axios.get(`/api/demo-account/${userId}`);
       setDemoAccount(res.data);
       setAccountSuccess('Position closed successfully!');
-    } catch (err: any) {
+    } catch {
       setAccountError('Failed to close position.');
     }
   };
-
-  // Handler to close all positions
   const handleCloseAllPositions = async () => {
     try {
       await axios.patch(`/api/demo-account/${userId}/positions/close-all`);
-      // Refresh account data
       const res = await axios.get(`/api/demo-account/${userId}`);
       setDemoAccount(res.data);
       setAccountSuccess('All positions closed successfully!');
-    } catch (err: any) {
+    } catch {
       setAccountError('Failed to close all positions.');
     }
   };
+
+  // Stats
+  const openPositions = gridOpenPositionsWithPnL;
+  interface Position {
+    id?: string;
+    _id?: string;
+    symbol: string;
+    type: 'BUY' | 'SELL';
+    quantity: number;
+    entryPrice: number;
+    currentPrice?: number;
+    market: 'crypto' | 'forex' | 'stocks' | 'commodities';
+    pnl?: number;
+    pnlPercentage?: number;
+    direction?: 'BUY' | 'SELL';
+    [key: string]: any;
+  }
+
+  interface DemoAccount {
+    balance: number;
+    openPositions: Position[];
+    tradeHistory: Position[];
+    [key: string]: any;
+  }
+
+  const totalValue = openPositions.reduce(
+    (sum: number, pos: Position) => sum + (pos.quantity * (pos.currentPrice || pos.entryPrice)),
+    0
+  );
+  const totalInvested = openPositions.reduce((sum: number, pos: Position) => sum + (pos.quantity * pos.entryPrice), 0);
+  const totalPnL = openPositions.reduce((sum: number, pos: Position) => sum + (pos.pnl ?? 0), 0);
+  const totalReturn = totalInvested > 0 ? ((totalValue - totalInvested) / totalInvested) * 100 : 0;
+  const totalClosed = closedPositions.length;
+  const totalWins = closedPositions.filter((pos: any) => (pos.pnl ?? pos.profit ?? 0) > 0).length;
+  const successRate = totalClosed > 0 ? (totalWins / totalClosed) * 100 : 0;
 
   // Stats Card Component
   const StatCard: React.FC<{
@@ -333,7 +335,7 @@ const Portfolio: React.FC = () => {
     </Card>
   );
 
-  // Define columns for the Open Positions DataGrid
+  // Open Positions DataGrid columns
   const openColumns: GridColDef[] = [
     {
       field: 'symbol',
@@ -470,8 +472,8 @@ const Portfolio: React.FC = () => {
     },
   ];
 
-  // Define columns for the Trading History (Closed Positions) DataGrid
-  const closedColumns = [
+  // Closed Positions DataGrid columns
+  const closedColumns: GridColDef[] = [
     {
       field: 'symbol',
       headerName: 'Symbol',
@@ -537,9 +539,6 @@ const Portfolio: React.FC = () => {
     },
   ];
 
-  // Calculate open P&L for all open positions
-  const openPnL = gridOpenPositionsWithPnL.reduce((sum: number, pos: any) => sum + (pos.pnl ?? 0), 0);
-
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Box mb={4}>
@@ -560,7 +559,23 @@ const Portfolio: React.FC = () => {
           variant="contained"
           color="primary"
           startIcon={demoAccount ? <RestartAltIcon /> : <Add />}
-          onClick={handleCreateOrResetDemo}
+          onClick={async () => {
+            setAccountActionLoading(true);
+            try {
+              if (!demoAccount) {
+                const res = await axios.post(`/api/demo-account/${userId}`);
+                setDemoAccount(res.data);
+                setAccountSuccess('Demo account created successfully!');
+              } else {
+                const res = await axios.patch(`/api/demo-account/${userId}/reset`, { balance: ORIGINAL_BALANCE });
+                setDemoAccount(res.data);
+                setAccountSuccess('Demo account reset successfully!');
+              }
+            } catch {
+              setAccountError('Failed to create/reset demo account.');
+            }
+            setAccountActionLoading(false);
+          }}
           disabled={accountActionLoading}
           sx={{
             background: `linear-gradient(45deg, ${theme.palette.primary.main} 30%, ${theme.palette.secondary.main} 90%)`,
@@ -644,7 +659,7 @@ const Portfolio: React.FC = () => {
               variant="outlined"
               color="error"
               onClick={handleCloseAllPositions}
-              disabled={gridOpenPositions.length === 0}
+              disabled={openPositions.length === 0}
             >
               Close All Positions
             </Button>
@@ -739,7 +754,7 @@ const Portfolio: React.FC = () => {
                 label="Symbol"
                 value={newPosition.symbol}
                 onChange={(e) => setNewPosition((prev) => ({ ...prev, symbol: e.target.value }))}
-                placeholder="e.g., EUR/USD, AAPL, BTC/USD"
+                placeholder="e.g., BTCUSDT, EURUSD, AAPL"
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
@@ -750,9 +765,9 @@ const Portfolio: React.FC = () => {
                   label="Market"
                   onChange={(e) => setNewPosition((prev) => ({ ...prev, market: e.target.value }))}
                 >
+                  <MenuItem value="crypto">Crypto</MenuItem>
                   <MenuItem value="forex">Forex</MenuItem>
                   <MenuItem value="stocks">Stocks</MenuItem>
-                  <MenuItem value="crypto">Crypto</MenuItem>
                   <MenuItem value="commodities">Commodities</MenuItem>
                 </Select>
               </FormControl>
