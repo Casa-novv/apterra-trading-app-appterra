@@ -65,24 +65,68 @@ const Signals: React.FC = () => {
   const [positionSuccess, setPositionSuccess] = useState(false);
   const [positionError, setPositionError] = useState('');
   const [quantity, setQuantity] = useState(1);
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   useEffect(() => {
+    // Initial fetch
     dispatch(fetchSignals());
-  }, [dispatch]);
+
+    setLastRefresh(new Date());
+
+    // Auto-refresh every 5 minutes if enabled
+    let interval: NodeJS.Timeout;
+    if (autoRefresh) {
+      interval = setInterval(() => {
+        console.log('🔄 Auto-refreshing signals...');
+        dispatch(fetchSignals());
+        setLastRefresh(new Date());
+      }, 5 * 60 * 1000); // 5 minutes
+    }
+
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [dispatch, autoRefresh]);
+
+  const isSignalRecent = (signal: any) => {
+    const signalDate = new Date(signal.timestamp || signal.createdAt);
+    const now = new Date();
+    const hoursDiff = (now.getTime() - signalDate.getTime()) / (1000 * 60 * 60);
+    
+    // Only show signals from last 24 hours
+    return hoursDiff <= 24;
+  };
 
   // Filtered signals based on search and filter criteria.
-  const filteredSignals = signals.filter((signal: any) => {
-    const matchesSearch = signal.symbol.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesMarket = filters.market === 'all' || signal.market === filters.market;
-    const matchesType = filters.type === 'all' || signal.type.toLowerCase() === filters.type;
-    const matchesConfidence =
-      filters.confidence === 'all' ||
-      (filters.confidence === 'high' && signal.confidence >= 80) ||
-      (filters.confidence === 'medium' && signal.confidence >= 60 && signal.confidence < 80) ||
-      (filters.confidence === 'low' && signal.confidence < 60);
-    const matchesTimeframe = filters.timeframe === 'all' || signal.timeframe === filters.timeframe;
-    return matchesSearch && matchesMarket && matchesType && matchesConfidence && matchesTimeframe;
-  });
+
+
+
+
+
+
+
+
+
+
+
+
+  const filteredSignals = signals
+    .filter(isSignalRecent)
+    .filter((signal: any) => {
+      const matchesSearch = signal.symbol.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesMarket = filters.market === 'all' || signal.market === filters.market;
+      const matchesType = filters.type === 'all' || signal.type.toLowerCase() === filters.type;
+      const matchesConfidence =
+        filters.confidence === 'all' ||
+        (filters.confidence === 'high' && signal.confidence >= 80) ||
+        (filters.confidence === 'medium' && signal.confidence >= 60 && signal.confidence < 80) ||
+        (filters.confidence === 'low' && signal.confidence < 60);
+      const matchesTimeframe = filters.timeframe === 'all' || signal.timeframe === filters.timeframe;
+      return matchesSearch && matchesMarket && matchesType && matchesConfidence && matchesTimeframe;
+    });
 
   const handleFilterChange = (filterType: string, value: string) => {
     setFilters(prev => ({ ...prev, [filterType]: value }));
@@ -157,6 +201,12 @@ const Signals: React.FC = () => {
     setPositionLoading(false);
   };
 
+  const handleManualRefresh = () => {
+    console.log('🔄 Manual refresh triggered...');
+    dispatch(fetchSignals());
+    setLastRefresh(new Date());
+  };
+
   // --- Theme-aware colors ---
   const accent = theme.palette.primary.main;
   const paperBg = theme.palette.background.paper;
@@ -175,6 +225,17 @@ const Signals: React.FC = () => {
         <Typography variant="h6" color="text.secondary">
           AI-powered trading signals across multiple markets
         </Typography>
+        <Box display="flex" alignItems="center" gap={2} mt={2}>
+          <Typography variant="body2" color="text.secondary">
+            Last updated: {lastRefresh.toLocaleTimeString()}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            • Showing signals from last 24 hours
+          </Typography>
+          <Typography variant="body2" color={autoRefresh ? 'success.main' : 'text.secondary'}>
+            • Auto-refresh: {autoRefresh ? 'ON' : 'OFF'}
+          </Typography>
+        </Box>
       </Box>
 
       {/* Filters */}
@@ -192,13 +253,41 @@ const Signals: React.FC = () => {
           <Typography variant="h6" sx={{ color: accent }}>
             Filters
           </Typography>
-          <Box ml="auto">
+
+          <Box ml="auto" display="flex" gap={1}>
+            <Button
+              variant={autoRefresh ? 'contained' : 'outlined'}
+              size="small"
+              onClick={() => setAutoRefresh(!autoRefresh)}
+              sx={{ 
+                color: autoRefresh ? 'white' : accent,
+                backgroundColor: autoRefresh ? accent : 'transparent'
+              }}
+            >
+              Auto-Refresh {autoRefresh ? 'ON' : 'OFF'}
+            </Button>
             <Button
               startIcon={<Refresh />}
-              onClick={() => dispatch(fetchSignals())}
+
+              onClick={handleManualRefresh}
               sx={{ color: accent }}
             >
-              Refresh
+
+              Refresh Now
+            </Button>
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={() => {
+                console.log('🧪 === SIGNALS DEBUG ===');
+                console.log('Total signals:', signals.length);
+                console.log('Recent signals (24h):', signals.filter(isSignalRecent).length);
+                console.log('Oldest signal:', signals.length > 0 ? new Date(Math.min(...signals.map((s: any) => new Date(s.timestamp || s.createdAt).getTime()))) : 'None');
+                console.log('Newest signal:', signals.length > 0 ? new Date(Math.max(...signals.map((s: any) => new Date(s.timestamp || s.createdAt).getTime()))) : 'None');
+                console.log('All signals:', signals);
+              }}
+            >
+              🧪 Debug Signals
             </Button>
           </Box>
         </Box>
@@ -253,7 +342,8 @@ const Signals: React.FC = () => {
                 <MenuItem value="all">All Levels</MenuItem>
                 <MenuItem value="high">High (80%+)</MenuItem>
                 <MenuItem value="medium">Medium (60-79%)</MenuItem>
-                <MenuItem value="low">Low (&lt;60%)</MenuItem>
+
+                <MenuItem value="low">Low ({'<'}60%)</MenuItem>
               </Select>
             </FormControl>
           </Grid>
@@ -275,6 +365,15 @@ const Signals: React.FC = () => {
           </Grid>
         </Grid>
       </Paper>
+
+      <Box mb={2}>
+        <Typography variant="body1" color="text.secondary">
+          Showing {filteredSignals.length} recent signals 
+          {signals.length > filteredSignals.length && (
+            <span> (filtered from {signals.length} total)</span>
+          )}
+        </Typography>
+      </Box>
 
       {/* Mobile Cards View */}
       <Box sx={{ display: { xs: 'block', md: 'none' } }}>

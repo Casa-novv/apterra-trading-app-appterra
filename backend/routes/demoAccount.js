@@ -1,7 +1,20 @@
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
 const DemoAccount = require('../models/DemoAccount');
 const DemoPosition = require('../models/DemoPosition');
+
+// Helper function to fetch current price
+const fetchCurrentPrice = async (symbol) => {
+  try {
+    // Use your existing price API endpoint
+    const response = await axios.get(`http://localhost:3000/api/price/${symbol}`);
+    return response.data.price;
+  } catch (error) {
+    console.log(`❌ Failed to fetch current price for ${symbol}:`, error.message);
+    return null;
+  }
+};
 
 // Get demo account for user
 router.get('/:userId', async (req, res) => {
@@ -42,10 +55,10 @@ router.post('/:userId/positions', async (req, res) => {
   const position = await DemoPosition.create({
     user: req.params.userId,
     symbol,
-    type: direction, // or direction: direction,
+    type: direction,
     quantity,
     entryPrice,
-    currentPrice: entryPrice, // <-- set this!
+    currentPrice: entryPrice,
     targetPrice,
     stopLoss,
     signalId,
@@ -91,23 +104,47 @@ router.patch('/:userId/positions/:positionId/close', async (req, res) => {
     // Get the position doc
     const position = account.openPositions[positionIndex];
 
-    // Use currentPrice if provided, else fallback to entryPrice
-    const currentPrice = position.currentPrice ?? position.entryPrice;
+    // 🔥 FETCH CURRENT PRICE BEFORE CLOSING
+    const livePrice = await fetchCurrentPrice(position.symbol);
+    const currentPrice = livePrice || position.currentPrice || position.entryPrice;
+    
+    const entryPrice = Number(position.entryPrice);
+    const quantity = Number(position.quantity);
+    const positionType = position.type || position.direction || 'BUY';
+
+    console.log(`💰 Closing ${position.symbol}:`);
+    console.log(`  - Entry Price: ${entryPrice}`);
+    console.log(`  - Live Price: ${livePrice}`);
+    console.log(`  - Current Price (used): ${currentPrice}`);
+    console.log(`  - Quantity: ${quantity}`);
+    console.log(`  - Type: ${positionType}`);
 
     // Calculate P&L
     let pnl = 0;
-    if (position.direction === 'BUY' || position.type === 'BUY') {
-      pnl = (currentPrice - position.entryPrice) * position.quantity;
-    } else {
-      pnl = (position.entryPrice - currentPrice) * position.quantity;
+    if (positionType === 'BUY') {
+      pnl = (currentPrice - entryPrice) * quantity;
+      console.log(`  - BUY P&L: (${currentPrice} - ${entryPrice}) * ${quantity} = ${pnl}`);
+    } else if (positionType === 'SELL') {
+      pnl = (entryPrice - currentPrice) * quantity;
+      console.log(`  - SELL P&L: (${entryPrice} - ${currentPrice}) * ${quantity} = ${pnl}`);
     }
+
+    console.log(`  - Old Balance: ${account.balance}`);
+
+    // 🔥 KEY FIX: Add P&L to account balance
+    account.balance = Number(account.balance) + Number(pnl);
+
+    console.log(`  - New Balance: ${account.balance}`);
+
+    // Update position with live price and P&L
+    position.currentPrice = currentPrice;
     position.pnl = pnl;
     position.status = 'closed';
     position.closedAt = new Date();
-    await position.save?.();
-
-    // Update account balance
-    account.balance += pnl;
+    
+    if (position.save) {
+      await position.save();
+    }
 
     // Move to tradeHistory
     account.tradeHistory.push(position._id);
@@ -120,6 +157,7 @@ router.patch('/:userId/positions/:positionId/close', async (req, res) => {
       .populate('tradeHistory');
     res.json(updatedAccount);
   } catch (err) {
+    console.error('❌ Error closing position:', err);
     res.status(500).json({ msg: 'Failed to close position', error: err.message });
   }
 });
@@ -133,21 +171,58 @@ router.patch('/:userId/positions/close-all', async (req, res) => {
       .populate('tradeHistory');
     if (!account) return res.status(404).json({ msg: 'No demo account found' });
 
+    console.log(`💰 Closing all positions for user ${userId}`);
+    console.log(`  Old Balance: ${account.balance}`);
+
+    let totalPnL = 0;
+
     for (const position of account.openPositions) {
-      const currentPrice = position.currentPrice ?? position.entryPrice;
+      // 🔥 FETCH CURRENT PRICE BEFORE CLOSING
+      const livePrice = await fetchCurrentPrice(position.symbol);
+      const currentPrice = livePrice || position.currentPrice || position.entryPrice;
+      
+      const entryPrice = Number(position.entryPrice);
+      const quantity = Number(position.quantity);
+      const positionType = position.type || position.direction || 'BUY';
+
+      console.log(`🔍 Position ${position.symbol} details:`);
+      console.log(`  - Entry Price: ${entryPrice}`);
+      console.log(`  - Live Price: ${livePrice}`);
+      console.log(`  - Current Price (used): ${currentPrice}`);
+      console.log(`  - Quantity: ${quantity}`);
+      console.log(`  - Type: ${positionType}`);
+
       let pnl = 0;
-      if (position.direction === 'BUY' || position.type === 'BUY') {
-        pnl = (currentPrice - position.entryPrice) * position.quantity;
-      } else {
-        pnl = (position.entryPrice - currentPrice) * position.quantity;
+      if (positionType === 'BUY') {
+        pnl = (currentPrice - entryPrice) * quantity;
+        console.log(`  - BUY P&L: (${currentPrice} - ${entryPrice}) * ${quantity} = ${pnl}`);
+      } else if (positionType === 'SELL') {
+        pnl = (entryPrice - currentPrice) * quantity;
+        console.log(`  - SELL P&L: (${entryPrice} - ${currentPrice}) * ${quantity} = ${pnl}`);
       }
+
+      totalPnL += pnl;
+
+      console.log(`  ${position.symbol}: P&L = ${pnl}`);
+
+      // Update position with live price and P&L
+      position.currentPrice = currentPrice;
       position.pnl = pnl;
       position.status = 'closed';
       position.closedAt = new Date();
-      await position.save?.();
-      account.balance += pnl;
+      
+      if (position.save) {
+        await position.save();
+      }
+      
       account.tradeHistory.push(position._id);
     }
+
+    account.balance = Number(account.balance) + Number(totalPnL);
+
+    console.log(`  Total P&L: ${totalPnL}`);
+    console.log(`  New Balance: ${account.balance}`);
+
     account.openPositions = [];
     await account.save();
 
@@ -156,6 +231,7 @@ router.patch('/:userId/positions/close-all', async (req, res) => {
       .populate('tradeHistory');
     res.json(updatedAccount);
   } catch (err) {
+    console.error('❌ Error closing all positions:', err);
     res.status(500).json({ msg: 'Failed to close all positions', error: err.message });
   }
 });
