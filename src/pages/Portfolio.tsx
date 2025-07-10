@@ -40,6 +40,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid, GridToolbar } from '@mui/x-data-grid';
 import { DebugPanel } from '../components/DebugPanel';
+import { safeNumber } from '../utils/formatters';
 
 const ORIGINAL_BALANCE = 100000;
 
@@ -322,6 +323,34 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
   const totalClosed = closedPositions.length;
   const totalWins = closedPositions.filter((pos: any) => (pos.pnl ?? pos.profit ?? 0) > 0).length;
   const successRate = totalClosed > 0 ? (totalWins / totalClosed) * 100 : 0;
+
+  const portfolioStats = {
+    balance: safeNumber(demoAccount?.balance, 100000),
+    totalPnL: safeNumber(demoAccount?.openPositions?.reduce((sum: number, pos: any) => {
+      // ... existing code
+    }, 0), 0),
+    openPositions: safeNumber(demoAccount?.openPositions?.length, 0),
+    closedPositions: safeNumber(demoAccount?.tradeHistory?.length, 0),
+    totalWins: safeNumber(demoAccount?.tradeHistory?.filter((pos: any) => safeNumber(pos.pnl, 0) > 0).length, 0),
+    totalLosses: safeNumber(demoAccount?.tradeHistory?.filter((pos: any) => safeNumber(pos.pnl, 0) <= 0).length, 0),
+    todaysPnL: 0,
+    largestWin: safeNumber(Math.max(...(demoAccount?.tradeHistory?.map((pos: any) => safeNumber(pos.pnl, 0)) || [0])), 0),
+    largestLoss: safeNumber(Math.min(...(demoAccount?.tradeHistory?.map((pos: any) => safeNumber(pos.pnl, 0)) || [0])), 0),
+    avgWinAmount: 0,
+    avgLossAmount: 0,
+    profitFactor: 1,
+    totalReturnPercentage: 0, // <-- Add this line
+    successRate: 0,           // <-- Add this line if used below
+  };
+
+  // Calculate derived stats safely
+  portfolioStats.totalReturnPercentage = portfolioStats.balance > 0 
+    ? (portfolioStats.totalPnL / portfolioStats.balance) * 100 
+    : 0;
+
+  portfolioStats.successRate = portfolioStats.closedPositions > 0 
+    ? (portfolioStats.totalWins / portfolioStats.closedPositions) * 100 
+    : 0;
 
   // Stats Card Component
   const StatCard: React.FC<{

@@ -280,24 +280,38 @@ async function fetchCurrentPrices() {
 }
 
 // Enhanced price broadcasting with error handling
-const priceUpdateInterval = setInterval(async () => {
-  try {
-    const prices = await fetchCurrentPrices();
-    if (prices) {
-      wss.clients.forEach(client => {
-        try {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ type: 'prices', prices }));
-          }
-        } catch (error) {
-          console.error('Error broadcasting prices:', error.message);
-        }
-      });
+const marketService = require('./services/marketService');
+const priceService = require('./services/priceService');
+
+// Add API status endpoint
+app.get('/api/status/apis', (req, res) => {
+  const status = priceService.getAPIStatus();
+  res.json({
+    timestamp: new Date().toISOString(),
+    apis: status,
+    summary: {
+      available: Object.values(status).filter(api => api.available).length,
+      total: Object.keys(status).length,
+      inCooldown: Object.values(status).filter(api => api.inCooldown).length
     }
-  } catch (error) {
-    console.error('Error in price update interval:', error.message);
-  }
-}, 5000);
+  });
+});
+
+// Update your price update interval
+const startPriceUpdates = () => {
+  console.log('📈 Starting enhanced price update service...');
+  
+  // Initial update
+  marketService.updatePrices();
+  
+  // Regular updates every 30 seconds (instead of 5 seconds to respect rate limits)
+  setInterval(async () => {
+    await marketService.updatePrices();
+  }, 30000);
+};
+
+// Replace your existing price update logic with:
+startPriceUpdates();
 
 // --- Market Data Endpoint & Update ---
 app.get('/api/market/data', async (req, res) => {
