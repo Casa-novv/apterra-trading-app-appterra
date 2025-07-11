@@ -38,7 +38,7 @@ import {
   Star,
   StarBorder,
 } from '@mui/icons-material';
-import { useTheme } from '@mui/material/styles';
+import { useTheme, alpha } from '@mui/material/styles';
 import { useAppSelector, useAppDispatch } from '../hooks/redux';
 import { fetchSignals } from '../store/slices/signalSlice';
 import axios from 'axios';
@@ -67,6 +67,17 @@ const Signals: React.FC = () => {
   const [quantity, setQuantity] = useState(1);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [sortBy, setSortBy] = useState<'confidence' | 'time' | 'symbol'>('confidence');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [signalStats, setSignalStats] = useState({
+    totalSignals: 0,
+    highConfidence: 0,
+    buySignals: 0,
+    sellSignals: 0,
+    avgConfidence: 0,
+  });
 
   useEffect(() => {
     // Initial fetch
@@ -91,6 +102,20 @@ const Signals: React.FC = () => {
     };
   }, [dispatch, autoRefresh]);
 
+  useEffect(() => {
+    const recentSignals = signals.filter(isSignalRecent);
+    const stats = {
+      totalSignals: recentSignals.length,
+      highConfidence: recentSignals.filter((s: any) => s.confidence >= 80).length,
+      buySignals: recentSignals.filter((s: any) => s.type.toLowerCase() === 'buy').length,
+      sellSignals: recentSignals.filter((s: any) => s.type.toLowerCase() === 'sell').length,
+      avgConfidence: recentSignals.length > 0 
+        ? Math.round(recentSignals.reduce((sum: number, s: any) => sum + s.confidence, 0) / recentSignals.length)
+        : 0,
+    };
+    setSignalStats(stats);
+  }, [signals]);
+
   const isSignalRecent = (signal: any) => {
     const signalDate = new Date(signal.timestamp || signal.createdAt);
     const now = new Date();
@@ -101,18 +126,6 @@ const Signals: React.FC = () => {
   };
 
   // Filtered signals based on search and filter criteria.
-
-
-
-
-
-
-
-
-
-
-
-
   const filteredSignals = signals
     .filter(isSignalRecent)
     .filter((signal: any) => {
@@ -126,6 +139,35 @@ const Signals: React.FC = () => {
         (filters.confidence === 'low' && signal.confidence < 60);
       const matchesTimeframe = filters.timeframe === 'all' || signal.timeframe === filters.timeframe;
       return matchesSearch && matchesMarket && matchesType && matchesConfidence && matchesTimeframe;
+    });
+
+  const sortedAndFilteredSignals = filteredSignals
+    .filter((signal: any) => showFavoritesOnly ? favoriteSignals.includes(signal.id) : true)
+    .sort((a: any, b: any) => {
+      let aValue, bValue;
+      
+      switch (sortBy) {
+        case 'confidence':
+          aValue = a.confidence;
+          bValue = b.confidence;
+          break;
+        case 'time':
+          aValue = new Date(a.timestamp || a.createdAt).getTime();
+          bValue = new Date(b.timestamp || b.createdAt).getTime();
+          break;
+        case 'symbol':
+          aValue = a.symbol;
+          bValue = b.symbol;
+          break;
+        default:
+          return 0;
+      }
+      
+      if (sortOrder === 'asc') {
+        return aValue > bValue ? 1 : -1;
+      } else {
+        return aValue < bValue ? 1 : -1;
+      }
     });
 
   const handleFilterChange = (filterType: string, value: string) => {
@@ -217,14 +259,82 @@ const Signals: React.FC = () => {
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-      {/* Header */}
+      {/* Enhanced Header with Statistics */}
       <Box mb={4}>
         <Typography variant="h3" component="h1" gutterBottom sx={{ fontWeight: 'bold' }}>
           Trading Signals
         </Typography>
-        <Typography variant="h6" color="text.secondary">
+        <Typography variant="h6" color="text.secondary" sx={{ mb: 3 }}>
           AI-powered trading signals across multiple markets
         </Typography>
+        
+        {/* Signal Statistics Cards */}
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          <Grid size={{ xs: 6, sm: 3 }}>
+            <Card sx={{ 
+              background: `linear-gradient(135deg, ${theme.palette.primary.main}20, ${theme.palette.primary.main}10)`,
+              border: `1px solid ${theme.palette.primary.main}30`,
+            }}>
+              <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                <Typography variant="h4" sx={{ fontWeight: 'bold', color: theme.palette.primary.main }}>
+                  {signalStats.totalSignals}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Total Signals
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          
+          <Grid size={{ xs: 6, sm: 3 }}>
+            <Card sx={{ 
+              background: `linear-gradient(135deg, ${theme.palette.success.main}20, ${theme.palette.success.main}10)`,
+              border: `1px solid ${theme.palette.success.main}30`,
+            }}>
+              <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                <Typography variant="h4" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
+                  {signalStats.highConfidence}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  High Confidence
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          
+          <Grid size={{ xs: 6, sm: 3 }}>
+            <Card sx={{ 
+              background: `linear-gradient(135deg, ${theme.palette.info.main}20, ${theme.palette.info.main}10)`,
+              border: `1px solid ${theme.palette.info.main}30`,
+            }}>
+              <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                <Typography variant="h4" sx={{ fontWeight: 'bold', color: theme.palette.info.main }}>
+                  {signalStats.buySignals}/{signalStats.sellSignals}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Buy/Sell Ratio
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          
+          <Grid size={{ xs: 6, sm: 3 }}>
+            <Card sx={{ 
+              background: `linear-gradient(135deg, ${theme.palette.warning.main}20, ${theme.palette.warning.main}10)`,
+              border: `1px solid ${theme.palette.warning.main}30`,
+            }}>
+              <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                <Typography variant="h4" sx={{ fontWeight: 'bold', color: theme.palette.warning.main }}>
+                  {signalStats.avgConfidence}%
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Avg Confidence
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+
         <Box display="flex" alignItems="center" gap={2} mt={2}>
           <Typography variant="body2" color="text.secondary">
             Last updated: {lastRefresh.toLocaleTimeString()}
@@ -238,7 +348,7 @@ const Signals: React.FC = () => {
         </Box>
       </Box>
 
-      {/* Filters */}
+      {/* Enhanced Filters with View Controls */}
       <Paper
         sx={{
           p: 3,
@@ -251,10 +361,43 @@ const Signals: React.FC = () => {
         <Box display="flex" alignItems="center" mb={2}>
           <FilterList sx={{ mr: 1, color: accent }} />
           <Typography variant="h6" sx={{ color: accent }}>
-            Filters
+            Filters & Controls
           </Typography>
 
           <Box ml="auto" display="flex" gap={1}>
+            {/* View Mode Toggle */}
+            <Button
+              variant={viewMode === 'cards' ? 'contained' : 'outlined'}
+              size="small"
+              onClick={() => setViewMode('cards')}
+              sx={{ minWidth: 'auto', px: 2 }}
+            >
+              Cards
+            </Button>
+            <Button
+              variant={viewMode === 'table' ? 'contained' : 'outlined'}
+              size="small"
+              onClick={() => setViewMode('table')}
+              sx={{ minWidth: 'auto', px: 2 }}
+            >
+              Table
+            </Button>
+            
+            {/* Favorites Toggle */}
+            <Button
+              variant={showFavoritesOnly ? 'contained' : 'outlined'}
+              size="small"
+              startIcon={<Star />}
+              onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+              sx={{ 
+                color: showFavoritesOnly ? 'white' : theme.palette.warning.main,
+                borderColor: theme.palette.warning.main,
+                backgroundColor: showFavoritesOnly ? theme.palette.warning.main : 'transparent'
+              }}
+            >
+              Favorites {favoriteSignals.length > 0 && `(${favoriteSignals.length})`}
+            </Button>
+            
             <Button
               variant={autoRefresh ? 'contained' : 'outlined'}
               size="small"
@@ -268,26 +411,10 @@ const Signals: React.FC = () => {
             </Button>
             <Button
               startIcon={<Refresh />}
-
               onClick={handleManualRefresh}
               sx={{ color: accent }}
             >
-
               Refresh Now
-            </Button>
-            <Button
-              variant="outlined"
-              color="secondary"
-              onClick={() => {
-                console.log('🧪 === SIGNALS DEBUG ===');
-                console.log('Total signals:', signals.length);
-                console.log('Recent signals (24h):', signals.filter(isSignalRecent).length);
-                console.log('Oldest signal:', signals.length > 0 ? new Date(Math.min(...signals.map((s: any) => new Date(s.timestamp || s.createdAt).getTime()))) : 'None');
-                console.log('Newest signal:', signals.length > 0 ? new Date(Math.max(...signals.map((s: any) => new Date(s.timestamp || s.createdAt).getTime()))) : 'None');
-                console.log('All signals:', signals);
-              }}
-            >
-              🧪 Debug Signals
             </Button>
           </Box>
         </Box>
@@ -301,6 +428,35 @@ const Signals: React.FC = () => {
               size="small"
             />
           </Grid>
+          
+          {/* Sort Controls */}
+          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Sort By</InputLabel>
+              <Select
+                value={sortBy}
+                label="Sort By"
+                onChange={(e) => setSortBy(e.target.value as any)}
+              >
+                <MenuItem value="confidence">Confidence</MenuItem>
+                <MenuItem value="time">Time</MenuItem>
+                <MenuItem value="symbol">Symbol</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          
+          <Grid size={{ xs: 12, sm: 6, md: 1 }}>
+            <Button
+              fullWidth
+              variant="outlined"
+              size="small"
+              onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+              sx={{ height: '40px' }}
+            >
+              {sortOrder === 'asc' ? '↑' : '↓'}
+            </Button>
+          </Grid>
+
           <Grid size={{ xs: 12, sm: 6, md: 2 }}>
             <FormControl fullWidth size="small">
               <InputLabel>Market</InputLabel>
@@ -342,12 +498,11 @@ const Signals: React.FC = () => {
                 <MenuItem value="all">All Levels</MenuItem>
                 <MenuItem value="high">High (80%+)</MenuItem>
                 <MenuItem value="medium">Medium (60-79%)</MenuItem>
-
                 <MenuItem value="low">Low ({'<'}60%)</MenuItem>
               </Select>
             </FormControl>
           </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 2 }}>
+          <Grid size={{ xs: 12, sm: 6, md: 1 }}>
             <FormControl fullWidth size="small">
               <InputLabel>Timeframe</InputLabel>
               <Select
@@ -366,126 +521,29 @@ const Signals: React.FC = () => {
         </Grid>
       </Paper>
 
-      <Box mb={2}>
+      <Box mb={2} display="flex" justifyContent="space-between" alignItems="center">
         <Typography variant="body1" color="text.secondary">
-          Showing {filteredSignals.length} recent signals 
-          {signals.length > filteredSignals.length && (
+          Showing {sortedAndFilteredSignals.length} signals 
+          {showFavoritesOnly && ' (favorites only)'}
+          {signals.length > sortedAndFilteredSignals.length && (
             <span> (filtered from {signals.length} total)</span>
           )}
         </Typography>
-      </Box>
-
-      {/* Mobile Cards View */}
-      <Box sx={{ display: { xs: 'block', md: 'none' } }}>
-        {filteredSignals.map((signal: any) => (
-          <Card
-            key={signal.id}
-            sx={{
-              mb: 2,
-              background: cardBg,
-              backdropFilter: 'blur(10px)',
-              border: `1px solid ${dividerColor}`,
-              cursor: 'pointer',
-            }}
-            onClick={() => handleSignalClick(signal)}
-          >
-            <CardContent>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-                  {signal.symbol}
-                </Typography>
-                <IconButton
-                  size="small"
-                  onClick={e => {
-                    e.stopPropagation();
-                    toggleFavorite(signal.id);
-                  }}
-                  sx={{ color: favoriteSignals.includes(signal.id) ? theme.palette.warning.main : 'inherit' }}
-                >
-                  {favoriteSignals.includes(signal.id) ? <Star /> : <StarBorder />}
-                </IconButton>
-              </Box>
-              <Box display="flex" alignItems="center" gap={1} mb={2}>
-                <Chip
-                  label={signal.type.toUpperCase()}
-                  color={signal.type.toLowerCase() === 'buy' ? 'success' : 'error'}
-                  size="small"
-                />
-                <Typography variant="body2" sx={{ fontWeight: 'bold', color: getConfidenceColor(signal.confidence) }}>
-                  {signal.confidence}%
-                </Typography>
-              </Box>
-
-              <Box mb={2}>
-                <Typography variant="body2" color="text.secondary" gutterBottom>
-                  Confidence Level
-                </Typography>
-                <Box display="flex" alignItems="center" gap={1}>
-                  <LinearProgress
-                    variant="determinate"
-                    value={signal.confidence}
-                    sx={{
-                      flexGrow: 1,
-                      height: 8,
-                      borderRadius: 4,
-                      backgroundColor: theme.palette.action.disabledBackground,
-                      '& .MuiLinearProgress-bar': {
-                        backgroundColor: getConfidenceColor(signal.confidence),
-                        borderRadius: 4,
-                      }
-                    }}
-                  />
-                  <Typography variant="body2" sx={{ color: getConfidenceColor(signal.confidence) }}>
-                    {signal.confidence}%
-                  </Typography>
-                </Box>
-              </Box>
-
-              <Grid container spacing={2}>
-                <Grid size={{ xs: 6 }}>
-                  <Typography variant="body2" color="text.secondary">Entry</Typography>
-                  <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
-                    {signal.entryPrice}
-                  </Typography>
-                </Grid>
-                <Grid size={{ xs: 6 }}>
-                  <Typography variant="body2" color="text.secondary">Target</Typography>
-                  <Typography variant="body1" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
-                    {signal.targetPrice}
-                  </Typography>
-                </Grid>
-                <Grid size={{ xs: 6 }}>
-                  <Typography variant="body2" color="text.secondary">Stop Loss</Typography>
-                  <Typography variant="body1" sx={{ fontWeight: 'bold', color: theme.palette.error.main }}>
-                    {signal.stopLoss}
-                  </Typography>
-                </Grid>
-                <Grid size={{ xs: 6 }}>
-                  <Typography variant="body2" color="text.secondary">Timeframe</Typography>
-                  <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
-                    {signal.timeframe}
-                  </Typography>
-                </Grid>
-              </Grid>
-
-              <Box mt={2}>
-                <Typography variant="body2" color="text.secondary">
-                  {signal.description}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {getTimeAgo(signal.timestamp || signal.createdAt)}
-                </Typography>
-              </Box>
-            </CardContent>
-          </Card>
-        ))}
+        
+        {sortedAndFilteredSignals.length > 0 && (
+          <Chip 
+            label={`Sorted by ${sortBy} (${sortOrder === 'desc' ? 'high to low' : 'low to high'})`}
+            size="small"
+            variant="outlined"
+            sx={{ color: accent, borderColor: accent }}
+          />
+        )}
       </Box>
 
       {/* Desktop Table View */}
       <Paper
-        component={Paper}
         sx={{
-          display: { xs: 'none', md: 'block' },
+          display: { xs: 'none', md: viewMode === 'table' ? 'block' : 'none' },
           background: paperBg,
           backdropFilter: 'blur(10px)',
           border: `1px solid ${dividerColor}`,
@@ -513,7 +571,7 @@ const Signals: React.FC = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {filteredSignals.map((signal: any) => (
+              {sortedAndFilteredSignals.map((signal: any) => (
                 <TableRow
                   key={signal.id}
                   sx={{
@@ -600,23 +658,242 @@ const Signals: React.FC = () => {
         </TableContainer>
       </Paper>
 
-      {/* Fallback when no signals match */}
-      {filteredSignals.length === 0 && (
+      {/* Enhanced Desktop Cards View */}
+      <Box sx={{ display: { xs: 'none', md: viewMode === 'cards' ? 'block' : 'none' } }}>
+        <Grid container spacing={3}>
+          {sortedAndFilteredSignals.map((signal: any) => (
+            <Grid size={{ xs: 12, sm: 6, lg: 4 }} key={signal.id}>
+              <Card
+                sx={{
+                  background: cardBg,
+                  backdropFilter: 'blur(10px)',
+                  border: `1px solid ${dividerColor}`,
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  position: 'relative',
+                  overflow: 'visible',
+                  '&:hover': {
+                    transform: 'translateY(-8px)',
+                    boxShadow: theme.shadows[12],
+                    border: `1px solid ${accent}50`,
+                  },
+                }}
+                onClick={() => handleSignalClick(signal)}
+              >
+                {/* Confidence Badge */}
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: -10,
+                    right: 15,
+                    background: `linear-gradient(45deg, ${getConfidenceColor(signal.confidence)}, ${getConfidenceColor(signal.confidence)}80)`,
+                    color: 'white',
+                    px: 2,
+                    py: 0.5,
+                    borderRadius: 2,
+                    fontSize: '0.75rem',
+                    fontWeight: 'bold',
+                    boxShadow: theme.shadows[4],
+                  }}
+                >
+                  {signal.confidence}%
+                </Box>
+
+                <CardContent sx={{ pb: 2 }}>
+                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                        {signal.symbol}
+                      </Typography>
+                      <Chip 
+                        label={signal.market?.toUpperCase()} 
+                        size="small" 
+                        variant="outlined" 
+                        sx={{ fontSize: '0.7rem' }} 
+                      />
+                    </Box>
+                    <IconButton
+                      size="small"
+                      onClick={e => {
+                        e.stopPropagation();
+                        toggleFavorite(signal.id);
+                      }}
+                      sx={{ 
+                        color: favoriteSignals.includes(signal.id) ? theme.palette.warning.main : 'inherit',
+                        '&:hover': {
+                          background: alpha(theme.palette.warning.main, 0.1),
+                        }
+                      }}
+                    >
+                      {favoriteSignals.includes(signal.id) ? <Star /> : <StarBorder />}
+                    </IconButton>
+                  </Box>
+
+                  {/* Signal Type with Icon */}
+                  <Box display="flex" alignItems="center" gap={1} mb={2}>
+                    {signal.type.toUpperCase() === 'BUY' ? (
+                      <TrendingUp sx={{ color: theme.palette.success.main }} />
+                    ) : (
+                      <TrendingDown sx={{ color: theme.palette.error.main }} />
+                    )}
+                    <Chip
+                      label={signal.type.toUpperCase()}
+                      color={signal.type.toLowerCase() === 'buy' ? 'success' : 'error'}
+                      size="small"
+                      sx={{ fontWeight: 'bold' }}
+                    />
+                    <Chip 
+                      label={signal.timeframe} 
+                      variant="outlined" 
+                      size="small" 
+                      sx={{ ml: 'auto' }}
+                    />
+                  </Box>
+
+                  {/* Enhanced Confidence Bar */}
+                  <Box mb={2}>
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                      <Typography variant="body2" color="text.secondary">
+                        Confidence Level
+                      </Typography>
+                      <Typography variant="body2" sx={{ 
+                        color: getConfidenceColor(signal.confidence),
+                        fontWeight: 'bold'
+                      }}>
+                        {signal.confidence >= 80 ? 'HIGH' : signal.confidence >= 60 ? 'MEDIUM' : 'LOW'}
+                      </Typography>
+                    </Box>
+                    <LinearProgress
+                      variant="determinate"
+                      value={signal.confidence}
+                      sx={{
+                        height: 8,
+                        borderRadius: 4,
+                        backgroundColor: theme.palette.action.disabledBackground,
+                        '& .MuiLinearProgress-bar': {
+                          backgroundColor: getConfidenceColor(signal.confidence),
+                          borderRadius: 4,
+                          background: `linear-gradient(90deg, ${getConfidenceColor(signal.confidence)}, ${getConfidenceColor(signal.confidence)}80)`,
+                        }
+                      }}
+                    />
+                  </Box>
+
+                  {/* Price Information Grid */}
+                  <Grid container spacing={2} sx={{ mb: 2 }}>
+                    <Grid size={{ xs: 6 }}>
+                      <Paper sx={{ p: 1.5, background: alpha(theme.palette.primary.main, 0.1) }}>
+                        <Typography variant="caption" color="text.secondary">Entry Price</Typography>
+                        <Typography variant="body1" sx={{ fontWeight: 'bold', color: theme.palette.primary.main }}>
+                          {signal.entryPrice}
+                        </Typography>
+                      </Paper>
+                    </Grid>
+                    <Grid size={{ xs: 6 }}>
+                      <Paper sx={{ p: 1.5, background: alpha(theme.palette.success.main, 0.1) }}>
+                        <Typography variant="caption" color="text.secondary">Target</Typography>
+                        <Typography variant="body1" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
+                          {signal.targetPrice}
+                        </Typography>
+                      </Paper>
+                    </Grid>
+                    <Grid size={{ xs: 12 }}>
+                      <Paper sx={{ p: 1.5, background: alpha(theme.palette.error.main, 0.1) }}>
+                        <Typography variant="caption" color="text.secondary">Stop Loss</Typography>
+                        <Typography variant="body1" sx={{ fontWeight: 'bold', color: theme.palette.error.main }}>
+                          {signal.stopLoss}
+                        </Typography>
+                      </Paper>
+                    </Grid>
+                  </Grid>
+
+                  {/* Description */}
+                  <Typography variant="body2" color="text.secondary" sx={{ 
+                    mb: 2,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                  }}>
+                    {signal.description}
+                  </Typography>
+
+                  {/* Footer with Time and Action */}
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Typography variant="caption" color="text.secondary" sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.5,
+                    }}>
+                      🕒 {getTimeAgo(signal.timestamp || signal.createdAt)}
+                    </Typography>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      color={signal.type.toLowerCase() === 'buy' ? 'success' : 'error'}
+                      sx={{
+                        minWidth: 'auto',
+                        px: 2,
+                        fontWeight: 'bold',
+                        '&:hover': {
+                          transform: 'scale(1.05)',
+                        }
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSignalClick(signal);
+                      }}
+                    >
+                      Trade
+                    </Button>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      </Box>
+
+      {/* Enhanced Fallback when no signals match */}
+      {sortedAndFilteredSignals.length === 0 && (
         <Paper
           sx={{
-            p: 4,
+            p: 6,
             textAlign: 'center',
             background: paperBg,
             backdropFilter: 'blur(10px)',
             border: `1px solid ${dividerColor}`,
+            borderRadius: 3,
           }}
         >
-          <Typography variant="h6" color="text.secondary">
-            No signals found matching your criteria
+          <Box sx={{ mb: 3 }}>
+            {showFavoritesOnly ? (
+              <Star sx={{ fontSize: 60, color: theme.palette.warning.main, mb: 2 }} />
+            ) : (
+              <FilterList sx={{ fontSize: 60, color: theme.palette.text.secondary, mb: 2 }} />
+            )}
+          </Box>
+          <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+            {showFavoritesOnly 
+              ? 'No favorite signals found' 
+              : 'No signals found matching your criteria'
+            }
           </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Try adjusting your filters or check back later for new signals.
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            {showFavoritesOnly 
+              ? 'Add some signals to your favorites to see them here.'
+              : 'Try adjusting your filters or check back later for new signals.'
+            }
           </Typography>
+          {showFavoritesOnly && (
+            <Button
+              variant="outlined"
+              onClick={() => setShowFavoritesOnly(false)}
+              sx={{ color: accent, borderColor: accent }}
+            >
+              Show All Signals
+            </Button>
+          )}
         </Paper>
       )}
 
@@ -697,3 +974,20 @@ const Signals: React.FC = () => {
 };
 
 export default Signals;
+<style>
+  {`
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    
+    @keyframes slideIn {
+      from { transform: translateX(-20px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    
+    .signal-card-enter {
+      animation: slideIn 0.3s ease-out;
+    }
+  `}
+</style>
