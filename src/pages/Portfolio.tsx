@@ -40,7 +40,32 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid, GridToolbar } from '@mui/x-data-grid';
 import { DebugPanel } from '../components/DebugPanel';
-import { safeNumber } from '../utils/formatters';
+
+const safeCurrency = (value: number | string | undefined | null): string => {
+  const numValue = Number(value);
+  if (isNaN(numValue)) return '$0.00';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numValue);
+};
+
+const safeNumber = (value: number | string | undefined | null): string => {
+  const numValue = Number(value);
+  if (isNaN(numValue)) return '0.00';
+  return numValue.toLocaleString(undefined, { 
+    minimumFractionDigits: 2, 
+    maximumFractionDigits: 4 
+  });
+};
+
+const safePercentage = (value: number | string | undefined | null): string => {
+  const numValue = Number(value);
+  if (isNaN(numValue)) return '0.00%';
+  return `${numValue.toFixed(2)}%`;
+};
 
 const ORIGINAL_BALANCE = 100000;
 
@@ -309,7 +334,7 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
 
   // Update your stats calculations
   const totalPnL = openPositions.reduce((sum: number, pos: Position) => sum + (pos.pnl ?? 0), 0);
-  const totalValue = safeNumber(demoAccount?.balance, 100000) + totalPnL;
+  const totalValue = safeNumber(demoAccount?.balance) + totalPnL;
   const totalOpenPositionsValue = openPositions.reduce((sum: number, pos: Position) => sum + (pos.currentPrice ?? pos.entryPrice) * pos.quantity, 0);
   const totalInvested = openPositions.reduce((sum: number, pos: Position) => sum + (pos.quantity * pos.entryPrice), 0);
 
@@ -323,17 +348,17 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
   const successRate = totalClosed > 0 ? (totalWins / totalClosed) * 100 : 0;
 
   const portfolioStats = {
-    balance: safeNumber(demoAccount?.balance, 100000),
+    balance: safeNumber(demoAccount?.balance,),
     totalPnL: safeNumber(demoAccount?.openPositions?.reduce((sum: number, pos: any) => {
       // ... existing code
-    }, 0), 0),
-    openPositions: safeNumber(demoAccount?.openPositions?.length, 0),
-    closedPositions: safeNumber(demoAccount?.tradeHistory?.length, 0),
-    totalWins: safeNumber(demoAccount?.tradeHistory?.filter((pos: any) => safeNumber(pos.pnl, 0) > 0).length, 0),
-    totalLosses: safeNumber(demoAccount?.tradeHistory?.filter((pos: any) => safeNumber(pos.pnl, 0) <= 0).length, 0),
+    }, 0), ),
+    openPositions: safeNumber(demoAccount?.openPositions?.length),
+    closedPositions: safeNumber(demoAccount?.tradeHistory?.length),
+    totalWins: safeNumber(demoAccount?.tradeHistory?.filter((pos: any) => Number(pos.pnl) > 0).length),
+    totalLosses: safeNumber(demoAccount?.tradeHistory?.filter((pos: any) => Number(pos.pnl) <= 0).length),
     todaysPnL: 0,
-    largestWin: safeNumber(Math.max(...(demoAccount?.tradeHistory?.map((pos: any) => safeNumber(pos.pnl, 0)) || [0])), 0),
-    largestLoss: safeNumber(Math.min(...(demoAccount?.tradeHistory?.map((pos: any) => safeNumber(pos.pnl, 0)) || [0])), 0),
+    largestWin: safeNumber(Math.max(...(demoAccount?.tradeHistory?.map((pos: any) => safeNumber(pos.pnl)) || [0]))),
+    largestLoss: safeNumber(Math.min(...(demoAccount?.tradeHistory?.map((pos: any) => safeNumber(pos.pnl)) || [0]))),
     avgWinAmount: 0,
     avgLossAmount: 0,
     profitFactor: 1,
@@ -342,12 +367,12 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
   };
 
   // Calculate derived stats safely
-  portfolioStats.totalReturnPercentage = portfolioStats.balance > 0 
-    ? (portfolioStats.totalPnL / portfolioStats.balance) * 100 
+  portfolioStats.totalReturnPercentage = Number(portfolioStats.balance) > 0 
+    ? (Number(portfolioStats.totalPnL) / Number(portfolioStats.balance)) * 100 
     : 0;
 
-  portfolioStats.successRate = portfolioStats.closedPositions > 0 
-    ? (portfolioStats.totalWins / portfolioStats.closedPositions) * 100 
+  portfolioStats.successRate = Number(portfolioStats.closedPositions) > 0 
+    ? (Number(portfolioStats.totalWins) / Number(portfolioStats.closedPositions)) * 100 
     : 0;
 
   // Stats Card Component
@@ -464,11 +489,7 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
       flex: 1,
       minWidth: 120,
       renderCell: (params: any) => (
-        <span>
-          {params.value !== undefined && params.value !== null && !isNaN(Number(params.value))
-            ? Number(params.value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
-            : ''}
-        </span>
+        <span>{safeNumber(params.value)}</span>
       ),
     },
     {
@@ -477,11 +498,7 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
       flex: 1,
       minWidth: 120,
       renderCell: (params: any) => (
-        <span>
-          {params.value !== undefined && params.value !== null && !isNaN(Number(params.value))
-            ? Number(params.value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
-            : ''}
-        </span>
+        <span>{safeNumber(params.value)}</span>
       ),
     },
     {
@@ -489,22 +506,9 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
       headerName: 'P&L',
       flex: 1,
       minWidth: 120,
-      renderCell: (params: any) => {
-        const pnlValue = Number(params.value) || 0;
-        const isPositive = pnlValue >= 0;
-        
-        return (
-          <Typography
-            variant="body2"
-            sx={{
-              color: isPositive ? theme.palette.success.main : theme.palette.error.main,
-              fontWeight: 'bold',
-            }}
-          >
-            ${pnlValue.toFixed(2)}
-          </Typography>
-        );
-      },
+      renderCell: (params: any) => (
+        <span>{safeCurrency(params.value)}</span>
+      ),
       cellClassName: (params: any) => (params.value >= 0 ? 'positiveCell' : 'negativeCell'),
     },
     {
@@ -839,15 +843,6 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
       </Paper>
     );
   };
-
-  function safeCurrency(totalValue: any) {
-    throw new Error('Function not implemented.');
-  }
-
-  function safePercentage(totalReturn: number) {
-    throw new Error('Function not implemented.');
-  }
-
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Box mb={4}>
@@ -904,15 +899,17 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Total Value"
-            value={`$${safeCurrency(totalValue)}`}
+            value={safeCurrency(totalValue)}
             icon={<AccountBalance sx={{ fontSize: 40 }} />}
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Total P&L"
-            value={`$${safeCurrency(totalPnL)}`}
-            change={`${safePercentage(totalReturn)}%`}
+
+
+            value={safeCurrency(totalPnL)}
+            change={`${totalReturn.toFixed(2)}%`}
             changeType={totalPnL >= 0 ? 'positive' : 'negative'}
             icon={<ShowChart sx={{ fontSize: 40 }} />}
           />
@@ -927,7 +924,8 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Success Rate"
-            value={`${safePercentage(successRate)}%`}
+
+            value={`${successRate.toFixed(2)}%`}
             icon={<TrendingUp sx={{ fontSize: 40 }} />}
           />
         </Grid>

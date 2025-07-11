@@ -85,7 +85,8 @@ const Register: React.FC = () => {
       return;
     }
 
-    const { confirmPassword, ...userData } = formData;
+    const { confirmPassword, name, ...rest } = formData;
+    const userData = { username: name, ...rest };
     dispatch(registerUser(userData));
   };
 

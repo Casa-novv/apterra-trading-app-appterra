@@ -29,14 +29,15 @@ import {
   Login as LoginIcon,
   PersonAdd,
 } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../hooks/redux';
+import { loginUser, clearError } from '../store/slices/authSlice';
 
 const Login: React.FC = () => {
   const theme = useTheme();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
-  const { loading, error, user } = useAppSelector((state: any) => state.auth);
+  const { loading, error, isAuthenticated, user } = useAppSelector((state: any) => state.auth);
 
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
@@ -65,13 +66,13 @@ const Login: React.FC = () => {
     }, 4000);
     return () => clearInterval(interval);
   }, []);
-
-  // Redirect if already logged in
+  // Add this useEffect in your Login component
   useEffect(() => {
-    if (user) {
-      navigate('/dashboard');
+    if (isAuthenticated && user) {
+      console.log('User authenticated, navigating...');
+      navigate('/dashboard'); // or '/' depending on your routing
     }
-  }, [user, navigate]);
+  }, [isAuthenticated, user, navigate]);
 
   const handleInputChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData(prev => ({ ...prev, [field]: e.target.value }));
@@ -79,6 +80,7 @@ const Login: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('Login attempt:', formData);
     
     if (!isLogin) {
       // Registration validation
@@ -94,9 +96,16 @@ const Login: React.FC = () => {
 
     try {
       if (isLogin) {
-        // Login logic - replace with your actual login action
-        // dispatch(loginUser({ email: formData.email, password: formData.password }));
-        console.log('Login:', { email: formData.email, password: formData.password });
+        const result = await dispatch(loginUser(formData));
+        console.log('Login result:', result);
+        
+        // Check if login was successful
+        if (loginUser.fulfilled.match(result)) {
+          console.log('Login successful, should navigate now');
+          // Navigation will happen via useEffect
+        } else {
+          console.log('Login failed:', result.payload);
+        }
       } else {
         // Registration logic - replace with your actual registration action
         // dispatch(registerUser({ 
