@@ -39,6 +39,7 @@ import {
 } from '@mui/icons-material';
 import { useAppSelector, useAppDispatch } from '../hooks/redux';
 import { fetchSignals } from '../store/slices/signalSlice';
+import { useNavigate } from 'react-router-dom';
 
 // Safe number formatter
 const safeNumber = (value: any, defaultValue: number = 0): number => {
@@ -133,9 +134,60 @@ const StatCard: React.FC<{
   );
 };
 
+const getGreeting = (userName: string) => {
+  const hour = new Date().getHours();
+  const greetings = [
+    // Morning greetings (5-11 AM)
+    ...(hour >= 5 && hour < 12 ? [
+      `Good morning, ${userName}! ☀️ Ready to conquer the markets today?`,
+      `Rise and shine, ${userName}! 🌅 Let's make some profitable trades!`,
+      `Morning, ${userName}! ☕ Time to turn coffee into cash!`,
+      `Good morning, ${userName}! 🚀 Today's looking bullish for your portfolio!`,
+      `Hey ${userName}! 🌟 Let's start this trading day strong!`,
+    ] : []),
+    
+    // Afternoon greetings (12-17 PM)
+    ...(hour >= 12 && hour < 17 ? [
+      `Good afternoon, ${userName}! 📈 How are your trades performing?`,
+      `Afternoon, ${userName}! 💰 Time to check those winning positions!`,
+      `Hey ${userName}! ⚡ Let's keep the momentum going!`,
+      `Good afternoon, ${userName}! 🎯 Ready to spot some opportunities?`,
+      `Afternoon trader ${userName}! 🔥 Let's make some money moves!`,
+    ] : []),
+    
+    // Evening greetings (17-21 PM)
+    ...(hour >= 17 && hour < 21 ? [
+      `Good evening, ${userName}! 🌆 Time to review today's performance!`,
+      `Evening, ${userName}! 📊 Let's analyze those market moves!`,
+      `Hey ${userName}! 🌙 Perfect time for some strategic planning!`,
+      `Good evening, ${userName}! ✨ Ready for some after-hours insights?`,
+      `Evening trader ${userName}! 🎪 Let's see what the markets brought us!`,
+    ] : []),
+    
+    // Night greetings (21-5 AM)
+    ...(hour >= 21 || hour < 5 ? [
+      `Good evening, ${userName}! 🌃 Burning the midnight oil?`,
+      `Hey night owl ${userName}! 🦉 Checking those global markets?`,
+      `Evening, ${userName}! 🌟 Perfect time for crypto trading!`,
+      `Good night, ${userName}! 🌙 Don't forget to set those stop losses!`,
+      `Late night trading, ${userName}? 💫 The markets never sleep!`,
+    ] : []),
+    
+    // General motivational greetings
+    `Welcome back, ${userName}! 💎 Diamond hands make diamond profits!`,
+    `Hey ${userName}! 🚀 Ready to reach for the moon?`,
+    `What's up, ${userName}! 🎯 Let's hit those profit targets!`,
+    `Welcome, ${userName}! 🔥 Your name is waiting for some action!`,
+    `Hey there, ${userName}! ⚡ Time to make the market work for you!`,
+  ];
+  
+  return greetings[Math.floor(Math.random() * greetings.length)];
+};
+
 const Dashboard: React.FC = () => {
   const theme = useTheme();
   const dispatch = useAppDispatch();
+  const navigate = useNavigate();
   
   // Redux state with safe defaults
   const { signals = [], loading: signalsLoading = false } = useAppSelector((state: any) => state.signals || {});
@@ -145,6 +197,7 @@ const Dashboard: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [alerts, setAlerts] = useState<any[]>([]);
   const [demoAccount, setDemoAccount] = useState<any>(null);
+  const [greeting, setGreeting] = useState('');
 
   // Calculate safe portfolio stats
   const portfolioStats = {
@@ -270,12 +323,22 @@ const Dashboard: React.FC = () => {
           }
         }
       } catch (error) {
-        console.error('Failed to fetch data:', error);
+        console.error('Failed to fetch data data error');
       }
     };
 
     fetchAllData();
   }, [dispatch, userId]);
+
+  // Get user from Redux state
+  const user = useAppSelector((state: any) => state.auth.user);
+
+  useEffect(() => {
+    if (user?.name || user?.username || user?.email) {
+      const userName = user?.username || user?.name || user?.email?.split('@')[0] || 'Trader';
+      setGreeting(getGreeting(userName));
+    }
+  }, [user]);
 
   // Generate alerts based on portfolio and signals
   useEffect(() => {
@@ -375,6 +438,46 @@ const Dashboard: React.FC = () => {
             </Alert>
           ))}
         </Box>
+      )}
+
+      {/* Welcome Greeting */}
+      {greeting && (
+        <Paper
+          sx={{
+            p: 3,
+            mb: 4,
+            background: `linear-gradient(135deg, ${theme.palette.primary.main}20 0%, ${theme.palette.secondary.main}20 100%)`,
+            backdropFilter: 'blur(10px)',
+            border: `1px solid ${theme.palette.divider}`,
+            borderRadius: 2,
+          }}
+        >
+          <Box display="flex" alignItems="center" justifyContent="space-between">
+            <Box>
+              <Typography 
+                variant="h5" 
+                sx={{ 
+                  fontWeight: 'bold',
+                  background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
+                  backgroundClip: 'text',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  mb: 1
+                }}
+              >
+                {greeting}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Your trading dashboard is ready • Demo Balance: ${safeCurrency(portfolioStats.balance)}
+              </Typography>
+            </Box>
+            <Box sx={{ fontSize: '2rem' }}>
+              {new Date().getHours() >= 5 && new Date().getHours() < 12 ? '☀️' :
+               new Date().getHours() >= 12 && new Date().getHours() < 17 ? '🌤️' :
+               new Date().getHours() >= 17 && new Date().getHours() < 21 ? '🌆' : '🌙'}
+            </Box>
+          </Box>
+        </Paper>
       )}
 
       {/* Main Stats Cards */}
@@ -745,7 +848,7 @@ const Dashboard: React.FC = () => {
                         <Typography
                           variant="body2"
                           sx={{
-                                                        color: safeNumber(trade.pnl, 0) >= 0 ? theme.palette.success.main : theme.palette.error.main,
+                            color: safeNumber(trade.pnl, 0) >= 0 ? theme.palette.success.main : theme.palette.error.main,
                             fontWeight: 'bold'
                           }}
                         >
@@ -802,7 +905,7 @@ const Dashboard: React.FC = () => {
                   background: `linear-gradient(45deg, ${theme.palette.secondary.main} 30%, ${theme.palette.primary.dark || theme.palette.primary.main} 90%)`,
                 },
               }}
-              onClick={() => window.location.href = '/portfolio'}
+              onClick={() => navigate('/portfolio')}
             >
               View Portfolio
             </Button>
@@ -813,12 +916,12 @@ const Dashboard: React.FC = () => {
               variant="contained"
               startIcon={<NotificationsActive />}
               sx={{
-                background: `linear-gradient(45deg, ${theme.palette.warning.main} 30%, ${theme.palette.warning.dark} 90%)`,
+                background: `linear-gradient(45deg, ${theme.palette.warning.main} 30%, ${theme.palette.warning.main} 90%)`,
                 '&:hover': {
                   background: `linear-gradient(45deg, ${theme.palette.warning.dark} 30%, ${theme.palette.warning.main} 90%)`,
                 },
               }}
-              onClick={() => window.location.href = '/signals'}
+              onClick={() => navigate('/signals')}
             >
               View Signals
             </Button>
@@ -828,7 +931,7 @@ const Dashboard: React.FC = () => {
               fullWidth
               variant="outlined"
               startIcon={<Assessment />}
-              onClick={() => window.location.href = '/analytics'}
+              onClick={() => navigate('/analytics')}
             >
               Analytics
             </Button>
@@ -838,7 +941,7 @@ const Dashboard: React.FC = () => {
               fullWidth
               variant="outlined"
               startIcon={<Info />}
-              onClick={() => window.location.href = '/help'}
+              onClick={() => navigate('/help')}
             >
               Help & Support
             </Button>

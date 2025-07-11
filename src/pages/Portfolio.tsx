@@ -308,12 +308,10 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
   }
 
   // Update your stats calculations
-  const totalValue = openPositions.reduce(
-    (sum: number, pos: Position) => sum + (pos.quantity * (pos.currentPrice || pos.entryPrice)),
-    0
-  );
-  const totalInvested = openPositions.reduce((sum: number, pos: Position) => sum + (pos.quantity * pos.entryPrice), 0);
   const totalPnL = openPositions.reduce((sum: number, pos: Position) => sum + (pos.pnl ?? 0), 0);
+  const totalValue = safeNumber(demoAccount?.balance, 100000) + totalPnL;
+  const totalOpenPositionsValue = openPositions.reduce((sum: number, pos: Position) => sum + (pos.currentPrice ?? pos.entryPrice) * pos.quantity, 0);
+  const totalInvested = openPositions.reduce((sum: number, pos: Position) => sum + (pos.quantity * pos.entryPrice), 0);
 
   // Calculate the dynamic portfolio balance
   const currentBalance = demoAccount ? Number(demoAccount.balance) : 0;
@@ -842,6 +840,14 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
     );
   };
 
+  function safeCurrency(totalValue: any) {
+    throw new Error('Function not implemented.');
+  }
+
+  function safePercentage(totalReturn: number) {
+    throw new Error('Function not implemented.');
+  }
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Box mb={4}>
@@ -898,15 +904,15 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Total Value"
-            value={`$${Number(totalValue).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+            value={`$${safeCurrency(totalValue)}`}
             icon={<AccountBalance sx={{ fontSize: 40 }} />}
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
-            title="Unrealized P&L"
-            value={`$${Number(totalPnL).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
-            change={`${totalReturn.toFixed(2)}%`}
+            title="Total P&L"
+            value={`$${safeCurrency(totalPnL)}`}
+            change={`${safePercentage(totalReturn)}%`}
             changeType={totalPnL >= 0 ? 'positive' : 'negative'}
             icon={<ShowChart sx={{ fontSize: 40 }} />}
           />
@@ -921,7 +927,7 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Success Rate"
-            value={`${successRate.toFixed(2)}%`}
+            value={`${safePercentage(successRate)}%`}
             icon={<TrendingUp sx={{ fontSize: 40 }} />}
           />
         </Grid>
@@ -1045,19 +1051,6 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
               disabled={openPositions.length === 0}
             >
               Close All Positions
-            </Button>
-            <Button
-              variant="outlined"
-              color="secondary"
-              onClick={() => {
-                console.log('💰 Balance Debug:');
-                console.log('Current Balance:', demoAccount?.balance);
-                console.log('Total P&L:', totalPnL);
-                console.log('Portfolio Value:', portfolioValue);
-                console.log('Open Positions:', openPositions.length);
-              }}
-            >
-              💰 Debug Balance
             </Button>
           </Box>
         </Box>

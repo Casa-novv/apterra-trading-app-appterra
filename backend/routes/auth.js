@@ -7,25 +7,37 @@ const router = express.Router();
 
 // Register route
 router.post('/register', async (req, res) => {
-  const { email, password, name } = req.body; // Note: Expecting email, password, and name
   try {
-    // Check if the user already exists (by email)
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      return res.status(400).json({ msg: 'User already exists' });
+    const { username, email, password } = req.body;
+    
+    // Check if username already exists
+    const existingUsername = await User.findOne({ username });
+    if (existingUsername) {
+      return res.status(400).json({ msg: 'Username already taken' });
     }
-    // Hash the password before saving
-    const hashed = await bcrypt.hash(password, 10);
-    // Create and save the new user
-    const user = new User({ email, name, password: hashed });
+    
+    // Check if email already exists
+    const existingEmail = await User.findOne({ email });
+    if (existingEmail) {
+      return res.status(400).json({ msg: 'Email already registered' });
+    }
+    
+    // Create user with username
+    const user = new User({ username, email, password });
     await user.save();
-
-    // --- Create demo account for new user ---
-    await DemoAccount.create({ user: user._id });
-
-    res.json({ msg: 'User registered' });
-  } catch (err) {
-    console.error('Register error:', err);
+    
+    // Generate JWT token
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET);
+    
+    res.json({
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+      },
+    });
+  } catch (error) {
     res.status(500).json({ msg: 'Server error' });
   }
 });
