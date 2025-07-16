@@ -583,7 +583,37 @@ async function fetchLatestPrice(symbol, market) {
   }
 }
 
-// --- Rolling price history updater (every 30s) ---
+// --- Enhanced Helper: Fetch latest price with retry and rate limiting ---
+async function fetchLatestPriceWithRetry(symbol, market, maxRetries = 3) {
+  let retryCount = 0;
+  
+  while (retryCount < maxRetries) {
+    try {
+      // Add delay for rate limiting (stagger requests)
+      if (retryCount > 0) {
+        const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
+        console.log(`Retrying ${symbol} after ${delay}ms delay...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+      
+      const price = await fetchLatestPrice(symbol, market);
+      if (price !== null) {
+        return price;
+      }
+      
+      console.log(`API returned null for ${symbol}, attempt ${retryCount + 1}`);
+      retryCount++;
+    } catch (error) {
+      console.error(`API error for ${symbol} (attempt ${retryCount + 1}):`, error.message);
+      retryCount++;
+    }
+  }
+  
+  console.error(`Failed to fetch price for ${symbol} after ${maxRetries} attempts`);
+  return null;
+}
+
+// --- Enhanced price history updater with rate limiting ---
 const assets = [
   { symbol: 'BTCUSDT', market: 'crypto' },
   { symbol: 'ETHUSDT', market: 'crypto' },
@@ -596,10 +626,22 @@ const assets = [
 ];
 
 const priceHistoryInterval = setInterval(async () => {
-  for (const asset of assets) {
+  console.log('🔄 Starting price history update...');
+  
+  for (let i = 0; i < assets.length; i++) {
+    const asset = assets[i];
+    
     try {
-      const price = await fetchLatestPrice(asset.symbol, asset.market);
-      if (!price) continue;
+      // Add delay between requests to respect rate limits
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between assets
+      }
+      
+      const price = await fetchLatestPriceWithRetry(asset.symbol, asset.market);
+      if (!price) {
+        console.log(`⚠️ Skipping ${asset.symbol} - no price data available`);
+        continue;
+      }
       
       if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
       priceHistories[asset.symbol].push(price);
@@ -608,23 +650,77 @@ const priceHistoryInterval = setInterval(async () => {
       if (priceHistories[asset.symbol].length > 30) {
         priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-30);
       }
+      
+      console.log(`✅ Updated ${asset.symbol}: $${price} (${priceHistories[asset.symbol].length} points)`);
     } catch (error) {
       console.error(`Error updating price history for ${asset.symbol}:`, error.message);
     }
   }
-}, 30 * 1000); // every 30 seconds
+  
+  console.log('✅ Price history update completed');
+}, 2 * 60 * 1000); // every 2 minutes instead of 30 seconds
 
-// --- Signal generation (every 15 minutes) ---
+// --- Enhanced signal generation with proper data validation ---
 const signalGenerationInterval = setInterval(async () => {
   if (mongoose.connection.readyState !== 1) {
     console.log('MongoDB not connected - skipping signal generation');
     return;
   }
 
+  console.log('🤖 Starting signal generation...');
+  
+  // Wait for price data to be available (2-3 minutes as requested)
+  const waitForPriceData = async () => {
+    const maxWaitTime = 3 * 60 * 1000; // 3 minutes
+    const checkInterval = 30 * 1000; // Check every 30 seconds
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < maxWaitTime) {
+      let allAssetsHaveData = true;
+      
+      for (const asset of assets) {
+        const priceHistory = priceHistories[asset.symbol] || [];
+        if (priceHistory.length < 20) {
+          allAssetsHaveData = false;
+          break;
+        }
+      }
+      
+      if (allAssetsHaveData) {
+        console.log('✅ All assets have sufficient price data');
+        return true;
+      }
+      
+      console.log('⏳ Waiting for more price data...');
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
+    }
+    
+    console.log('⚠️ Timeout waiting for price data');
+    return false;
+  };
+  
+  // Wait for price data before generating signals
+  const dataReady = await waitForPriceData();
+  if (!dataReady) {
+    console.log('❌ Insufficient price data - skipping signal generation');
+    return;
+  }
+
   for (const asset of assets) {
     try {
       const priceHistory = priceHistories[asset.symbol] || [];
-      if (priceHistory.length < 20) continue; // Need enough data for indicators
+      
+      // Enhanced data validation
+      if (priceHistory.length < 20) {
+        console.log(`⚠️ Skipping ${asset.symbol} - insufficient data (${priceHistory.length} points)`);
+        continue;
+      }
+      
+      // Check if price data is recent (within last 5 minutes)
+      const latestPriceTime = Date.now();
+      const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+      
+      console.log(`📊 Generating signal for ${asset.symbol} with ${priceHistory.length} data points`);
       
       // --- Technical Indicators ---
       const rsiValues = RSI.calculate({ values: priceHistory, period: 14 });
@@ -655,27 +751,43 @@ const signalGenerationInterval = setInterval(async () => {
         newsSentiment = 0;
       }
       
-      // --- Signal logic (example: combine indicators) ---
+      // --- Enhanced signal logic with better validation ---
       let signalType = 'HOLD';
-      if (currentRSI > 60 && currentMACD > 0 && currentEMA > currentSMA) {
+      let signalStrength = 0;
+      
+      // RSI signals
+      if (currentRSI > 70) signalStrength -= 1; // Overbought
+      if (currentRSI < 30) signalStrength += 1; // Oversold
+      
+      // MACD signals
+      if (currentMACD > 0) signalStrength += 0.5;
+      if (currentMACD < 0) signalStrength -= 0.5;
+      
+      // Moving average signals
+      if (currentEMA > currentSMA) signalStrength += 0.5;
+      if (currentEMA < currentSMA) signalStrength -= 0.5;
+      
+      // Determine signal type based on strength
+      if (signalStrength >= 1.5) {
         signalType = 'BUY';
-      } else if (currentRSI < 40 && currentMACD < 0 && currentEMA < currentSMA) {
+      } else if (signalStrength <= -1.5) {
         signalType = 'SELL';
       }
       
-      // Confidence: combine indicator strengths
-      const confidence = Math.round(
-        Math.abs(currentRSI - 50) +
-        Math.abs(currentMACD) * 10 +
-        Math.abs(currentEMA - currentSMA) +
-        Math.abs(newsSentiment) * 5
-      );
+      // Enhanced confidence calculation
+      const confidence = Math.min(100, Math.max(0, Math.round(
+        (Math.abs(currentRSI - 50) * 0.8) +
+        (Math.abs(currentMACD) * 20) +
+        (Math.abs(currentEMA - currentSMA) / currentSMA * 100 * 0.5) +
+        (Math.abs(newsSentiment) * 10)
+      )));
       
       const livePrice = priceHistory[priceHistory.length - 1];
       const stopLoss = livePrice * (signalType === 'BUY' ? 0.98 : 1.02);
       const targetPrice = livePrice * (signalType === 'BUY' ? 1.05 : 0.95);
       
-      if (signalType !== 'HOLD') {
+      // Only generate signals with reasonable confidence
+      if (signalType !== 'HOLD' && confidence >= 60) {
         const signalData = {
           symbol: asset.symbol,
           type: signalType,
@@ -685,14 +797,25 @@ const signalGenerationInterval = setInterval(async () => {
           stopLoss,
           timeframe: '15M',
           market: asset.market,
-          description: `Signal: ${signalType} (${confidence}%)`,
-          reasoning: `RSI=${currentRSI}, MACD=${currentMACD}, EMA=${currentEMA}, SMA=${currentSMA}, Sentiment=${newsSentiment}`,
-          technicalIndicators: { rsi: currentRSI, macd: currentMACD, ema: currentEMA, sma: currentSMA, newsSentiment },
+          description: `${signalType} signal with ${confidence}% confidence`,
+          reasoning: `RSI=${currentRSI.toFixed(2)}, MACD=${currentMACD.toFixed(4)}, EMA=${currentEMA.toFixed(2)}, SMA=${currentSMA.toFixed(2)}, Sentiment=${newsSentiment}`,
+          technicalIndicators: { 
+            rsi: currentRSI, 
+            macd: currentMACD, 
+            ema: currentEMA, 
+            sma: currentSMA, 
+            newsSentiment,
+            signalStrength 
+          },
           status: 'active',
           createdAt: new Date(),
           expiresAt: new Date(Date.now() + 15 * 60 * 1000),
           source: 'ai',
-          risk: confidence > 80 ? 'high' : confidence > 60 ? 'medium' : 'low'
+          risk: confidence > 80 ? 'high' : confidence > 60 ? 'medium' : 'low',
+          dataQuality: {
+            pricePoints: priceHistory.length,
+            dataAge: 'recent'
+          }
         };
         
         // Remove expired or lower-confidence signals for this asset
@@ -706,11 +829,17 @@ const signalGenerationInterval = setInterval(async () => {
         
         const newSignal = await Signal.create(signalData);
         broadcastSignal(newSignal);
+        
+        console.log(`🎯 Generated ${signalType} signal for ${asset.symbol} with ${confidence}% confidence`);
+      } else {
+        console.log(`⚪ HOLD signal for ${asset.symbol} (confidence: ${confidence}%)`);
       }
     } catch (error) {
       console.error(`Error generating signal for ${asset.symbol}:`, error.message);
     }
   }
+  
+  console.log('🎯 Signal generation completed');
 }, 15 * 60 * 1000); // every 15 minutes
 
 // --- Signals API Endpoint ---
