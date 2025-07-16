@@ -817,17 +817,19 @@ async function getPriceHistory(symbol, length = 50) {
 
 // --- Demo Position Monitoring Job ---
 let monitorDemoPositions;
+let demoMonitorInterval;
 try {
   const demoMonitor = require('./jobs/demoPositionMonitor');
   monitorDemoPositions = demoMonitor.monitorDemoPositions;
-  const demoMonitorInterval = setInterval(monitorDemoPositions, 60 * 1000); // every minute
   console.log('✅ Demo position monitor loaded');
 } catch (error) {
   console.error('⚠️ Demo position monitor not found:', error.message);
   // Create a mock function to prevent crashes
-    monitorDemoPositions = () => console.log('Demo position monitoring skipped - module not found');
-  const demoMonitorInterval = setInterval(monitorDemoPositions, 60 * 1000); // every minute
+  monitorDemoPositions = () => console.log('Demo position monitoring skipped - module not found');
 }
+
+// Start the monitoring interval regardless of whether the module was found
+demoMonitorInterval = setInterval(monitorDemoPositions, 60 * 1000); // every minute
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -862,6 +864,7 @@ const gracefulShutdown = async (signal) => {
   clearInterval(portfolioUpdateInterval);
   clearInterval(priceHistoryInterval);
   clearInterval(signalGenerationInterval);
+  clearInterval(demoMonitorInterval);
   
   // Close WebSocket server
   wss.close(() => {
