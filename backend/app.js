@@ -299,16 +299,25 @@ app.get('/api/status/apis', (req, res) => {
 });
 
 // Update your price update interval
+let priceUpdateInterval;
 const startPriceUpdates = () => {
   console.log('📈 Starting enhanced price update service...');
   
-  // Initial update
-  marketService.updatePrices();
-  
-  // Regular updates every 30 seconds (instead of 5 seconds to respect rate limits)
-  setInterval(async () => {
-    await marketService.updatePrices();
-  }, 30000);
+  try {
+    // Initial update
+    if (marketService && typeof marketService.updatePrices === 'function') {
+      marketService.updatePrices();
+      
+      // Regular updates every 30 seconds (instead of 5 seconds to respect rate limits)
+      priceUpdateInterval = setInterval(async () => {
+        await marketService.updatePrices();
+      }, 30000);
+    } else {
+      console.error('⚠️ marketService.updatePrices is not available');
+    }
+  } catch (error) {
+    console.error('❌ Error starting price update service:', error.message);
+  }
 };
 
 // Price updates will be started by startIntervals() function
@@ -891,60 +900,93 @@ let portfolioUpdateInterval;
 const startIntervals = () => {
   console.log('🔄 Initializing all intervals and services...');
   
-  // Start price update service
-  startPriceUpdates();
+  // Debug: Check all functions before starting intervals
+  console.log('🔍 Function validation:');
+  console.log(`- startPriceUpdates: ${typeof startPriceUpdates}`);
+  console.log(`- generateSignals: ${typeof generateSignals}`);
+  console.log(`- monitorDemoPositions: ${typeof monitorDemoPositions}`);
+  console.log(`- updateMarketData: ${typeof updateMarketData}`);
+  console.log(`- updatePortfolioData: ${typeof updatePortfolioData}`);
   
-  // Start price history updater
-  priceHistoryInterval = setInterval(async () => {
-    console.log('🔄 Starting price history update...');
-    
-    for (let i = 0; i < assets.length; i++) {
-      const asset = assets[i];
-      
-      try {
-        // Add delay between requests to respect rate limits
-        if (i > 0) {
-          await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between assets
-        }
-        
-        const price = await fetchLatestPriceWithRetry(asset.symbol, asset.market);
-        if (!price) {
-          console.log(`⚠️ Skipping ${asset.symbol} - no price data available`);
-          continue;
-        }
-        
-        if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
-        priceHistories[asset.symbol].push(price);
-        
-        // Keep only the last 30 prices
-        if (priceHistories[asset.symbol].length > 30) {
-          priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-30);
-        }
-        
-        console.log(`✅ Updated ${asset.symbol} (${asset.market}): $${price} (${priceHistories[asset.symbol].length} points)`);
-      } catch (error) {
-        console.error(`Error updating price history for ${asset.symbol}:`, error.message);
-      }
+  try {
+    // Start price update service
+    if (typeof startPriceUpdates === 'function') {
+      startPriceUpdates();
+    } else {
+      console.error('⚠️ startPriceUpdates is not a function, type:', typeof startPriceUpdates);
     }
     
-    console.log('✅ Price history update completed');
-  }, 2 * 60 * 1000); // every 2 minutes
+    // Start price history updater
+    priceHistoryInterval = setInterval(async () => {
+      console.log('🔄 Starting price history update...');
+      
+      for (let i = 0; i < assets.length; i++) {
+        const asset = assets[i];
+        
+        try {
+          // Add delay between requests to respect rate limits
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between assets
+          }
+          
+          const price = await fetchLatestPriceWithRetry(asset.symbol, asset.market);
+          if (!price) {
+            console.log(`⚠️ Skipping ${asset.symbol} - no price data available`);
+            continue;
+          }
+          
+          if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
+          priceHistories[asset.symbol].push(price);
+          
+          // Keep only the last 30 prices
+          if (priceHistories[asset.symbol].length > 30) {
+            priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-30);
+          }
+          
+          console.log(`✅ Updated ${asset.symbol} (${asset.market}): $${price} (${priceHistories[asset.symbol].length} points)`);
+        } catch (error) {
+          console.error(`Error updating price history for ${asset.symbol}:`, error.message);
+        }
+      }
+      
+      console.log('✅ Price history update completed');
+    }, 2 * 60 * 1000); // every 2 minutes
 
-  // Start signal generation
-  signalGenerationInterval = setInterval(generateSignals, 15 * 60 * 1000); // every 15 minutes
-  
-  // Start demo monitoring interval
-  demoMonitorInterval = setInterval(monitorDemoPositions, 60 * 1000); // every minute
-  
-  // Start market update interval
-  marketUpdateInterval = setInterval(updateMarketData, 5 * 60 * 1000);
-  setTimeout(updateMarketData, 10 * 1000); // Initial update after 10 seconds
-  
-  // Start portfolio update interval
-  portfolioUpdateInterval = setInterval(updatePortfolioData, 5 * 60 * 1000);
-  setTimeout(updatePortfolioData, 10 * 1000); // Initial update after 10 seconds
-  
-  console.log('✅ All intervals started successfully');
+    // Start signal generation
+    if (typeof generateSignals === 'function') {
+      signalGenerationInterval = setInterval(generateSignals, 15 * 60 * 1000); // every 15 minutes
+    } else {
+      console.error('⚠️ generateSignals is not a function');
+    }
+    
+    // Start demo monitoring interval
+    if (typeof monitorDemoPositions === 'function') {
+      demoMonitorInterval = setInterval(monitorDemoPositions, 60 * 1000); // every minute
+    } else {
+      console.error('⚠️ monitorDemoPositions is not a function');
+    }
+    
+    // Start market update interval
+    if (typeof updateMarketData === 'function') {
+      marketUpdateInterval = setInterval(updateMarketData, 5 * 60 * 1000);
+      setTimeout(updateMarketData, 10 * 1000); // Initial update after 10 seconds
+    } else {
+      console.error('⚠️ updateMarketData is not a function');
+    }
+    
+    // Start portfolio update interval
+    if (typeof updatePortfolioData === 'function') {
+      portfolioUpdateInterval = setInterval(updatePortfolioData, 5 * 60 * 1000);
+      setTimeout(updatePortfolioData, 10 * 1000); // Initial update after 10 seconds
+    } else {
+      console.error('⚠️ updatePortfolioData is not a function');
+    }
+    
+    console.log('✅ All intervals started successfully');
+  } catch (error) {
+    console.error('❌ Error starting intervals:', error.message);
+    console.error('Stack:', error.stack);
+  }
 }
 
 // --- Signals API Endpoint ---
@@ -1061,6 +1103,11 @@ try {
   monitorDemoPositions = () => console.log('Demo position monitoring skipped - module not found');
 }
 
+// Ensure monitorDemoPositions is always a function
+if (typeof monitorDemoPositions !== 'function') {
+  monitorDemoPositions = () => console.log('Demo position monitoring disabled - no valid function');
+}
+
 // Demo monitoring interval will be started by startIntervals() function
 
 // Error handling middleware
@@ -1091,6 +1138,7 @@ const gracefulShutdown = async (signal) => {
   console.log(`\n📴 Received ${signal}. Shutting down gracefully...`);
   
   // Clear all intervals
+  clearInterval(priceUpdateInterval);
   clearInterval(priceHistoryInterval);
   clearInterval(signalGenerationInterval);
   clearInterval(marketUpdateInterval);
