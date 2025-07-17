@@ -53,9 +53,7 @@ const connectDB = async () => {
       connectTimeoutMS: 10000,
       heartbeatFrequencyMS: 10000,
       retryWrites: true,
-      bufferCommands: false, // Disable mongoose buffering
-      bufferMaxEntries: 0,
-      // Removed bufferMaxEntries as it's deprecated
+      // Removed bufferCommands and bufferMaxEntries - they cause issues
     });
 
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
@@ -107,28 +105,52 @@ const connectDB = async () => {
   }
 };
 
-// Initialize MongoDB connection
-connectDB().catch(err => {
-  console.error('Failed to connect to MongoDB:', err.message);
-  process.exit(1);
-});
+// Initialize MongoDB connection with graceful fallback
+(async () => {
+  try {
+    await connectDB();
+    console.log('✅ Database connection established - all features available');
+  } catch (err) {
+    console.error('❌ Failed to connect to MongoDB:', err.message);
+    console.log('🔄 Continuing with limited functionality (no database features)...');
+    // Don't exit - continue with limited functionality
+  }
+})();
 
-// Health check endpoint
+// Enhanced health check endpoint
 app.get('/api/health', (req, res) => {
   const dbStatus = mongoose.connection.readyState;
   const dbStatusText = {
     0: 'Disconnected',
-    1: 'Connected',
+    1: 'Connected', 
     2: 'Connecting',
     3: 'Disconnecting'
   };
-
-  res.json({ 
+  
+  const isDbConnected = dbStatus === 1;
+  
+  res.json({
     status: 'Server Running',
     timestamp: new Date().toISOString(),
-    mongodb: dbStatusText[dbStatus] || 'Unknown',
+    services: {
+      database: {
+        status: dbStatusText[dbStatus] || 'Unknown',
+        connected: isDbConnected,
+        features: isDbConnected ? 'All features available' : 'Limited functionality'
+      },
+      priceUpdates: 'Active',
+      signalGeneration: isDbConnected ? 'Active' : 'Disabled (no database)',
+      authentication: isDbConnected ? 'Active' : 'Disabled (no database)',
+      demoTrading: isDbConnected ? 'Active' : 'Disabled (no database)'
+    },
     environment: process.env.NODE_ENV || 'development',
-    ip: '197.248.68.197'
+    ip: '197.248.68.197',
+    recommendations: !isDbConnected ? [
+      'Check your MongoDB connection string in .env file',
+      'Ensure your IP (197.248.68.197) is whitelisted in MongoDB Atlas',
+      'Verify your MongoDB Atlas cluster is running',
+      'Check your internet connection'
+    ] : []
   });
 });
 
@@ -345,7 +367,10 @@ app.get('/api/market/data', async (req, res) => {
 async function updateMarketData() {
   try {
     if (mongoose.connection.readyState !== 1) {
-      console.log('MongoDB not connected - skipping market data update');
+      // Reduced logging frequency - only log every 10th attempt
+      if (Math.random() < 0.1) {
+        console.log('🔌 MongoDB not connected - skipping market data update');
+      }
       return;
     }
 
@@ -392,7 +417,10 @@ app.get('/api/portfolio', async (req, res) => {
 async function updatePortfolioData() {
   try {
     if (mongoose.connection.readyState !== 1) {
-      console.log('MongoDB not connected - skipping portfolio update');
+      // Reduced logging frequency - only log every 10th attempt
+      if (Math.random() < 0.1) {
+        console.log('🔌 MongoDB not connected - skipping portfolio update');
+      }
       return;
     }
 
@@ -1160,10 +1188,21 @@ if (typeof monitorDemoPositions !== 'function') {
 
 // Demo monitoring interval will be started by startIntervals() function
 
-// Error handling middleware
+// Enhanced error handling middleware
 app.use((err, req, res, next) => {
+  // Don't log database connection errors repeatedly
+  if (err.message && err.message.includes('bufferCommands')) {
+    return res.status(503).json({
+      error: 'Database temporarily unavailable',
+      timestamp: new Date().toISOString(),
+      suggestion: 'Please try again later or check /api/health for system status'
+    });
+  }
+  
   console.error('❌ Server Error:', err.message);
-  console.error('Stack:', err.stack);
+  if (process.env.NODE_ENV === 'development') {
+    console.error('Stack:', err.stack);
+  }
   
   res.status(err.status || 500).json({
     error: process.env.NODE_ENV === 'production' 
@@ -1313,6 +1352,29 @@ startServer();
 if (!ALPHA_VANTAGE_KEY) console.warn('⚠️ Alpha Vantage API key missing - forex/stocks data limited');
 if (!TWELVE_DATA_KEY) console.warn('⚠️ Twelve Data API key missing - commodities data limited');
 if (!process.env.NEWS_API_KEY) console.warn('⚠️ News API key missing - sentiment analysis disabled');
+
+// Enhanced global error handling
+process.on('unhandledRejection', (reason, promise) => {
+  // Don't log database connection errors repeatedly
+  if (reason && reason.message && reason.message.includes('bufferCommands')) {
+    return; // Silently ignore these specific errors
+  }
+  
+  console.error('❌ Unhandled Promise Rejection:', reason.message || reason);
+  if (process.env.NODE_ENV === 'development') {
+    console.error('Stack:', reason.stack || 'No stack trace available');
+  }
+  // Don't exit the process - continue running
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error.message);
+  if (process.env.NODE_ENV === 'development') {
+    console.error('Stack:', error.stack);
+  }
+  // For uncaught exceptions, we should exit gracefully
+  gracefulShutdown('UNCAUGHT_EXCEPTION');
+});
 
 // Export app for testing
 module.exports = app;

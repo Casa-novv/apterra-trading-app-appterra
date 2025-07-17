@@ -2,9 +2,17 @@ const DemoAccount = require('../models/DemoAccount');
 const DemoPosition = require('../models/DemoPosition');
 const DemoTrade = require('../models/DemoTrade');
 const getPrice = require('../utils/getPrice'); // You need a helper to fetch live prices
+const mongoose = require('mongoose');
 
 async function monitorDemoPositions() {
-  const accounts = await DemoAccount.find({}).populate('openPositions');
+  // Check if database is connected
+  if (mongoose.connection.readyState !== 1) {
+    console.log('🔌 Database not connected - skipping demo position monitoring');
+    return;
+  }
+  
+  try {
+    const accounts = await DemoAccount.find({}).populate('openPositions');
   for (const account of accounts) {
     for (const posId of account.openPositions) {
       const position = await DemoPosition.findById(posId);
@@ -42,6 +50,9 @@ async function monitorDemoPositions() {
         await DemoPosition.findByIdAndDelete(posId);
       }
     }
+  }
+  } catch (error) {
+    console.error('❌ Error monitoring demo positions:', error.message);
   }
 }
 
