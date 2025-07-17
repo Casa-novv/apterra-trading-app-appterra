@@ -1,12 +1,26 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose'); // Add mongoose import
 const User = require('../models/User');
 const DemoAccount = require('../models/DemoAccount'); // Add this at the top
 const router = express.Router();
 
+// Helper function to check database connection
+const isDatabaseConnected = () => {
+  return mongoose.connection.readyState === 1;
+};
+
 // Register route
 router.post('/register', async (req, res) => {
+  // Check if database is connected
+  if (!isDatabaseConnected()) {
+    return res.status(503).json({ 
+      msg: 'Database not available. Please try again later.',
+      error: 'SERVICE_UNAVAILABLE'
+    });
+  }
+  
   try {
     const { username, email, password } = req.body;
     
@@ -45,6 +59,15 @@ router.post('/register', async (req, res) => {
 // Login route
 router.post('/login', async (req, res) => {
   const { email, password } = req.body; // Now expecting email and password
+  
+  // Check if database is connected
+  if (!isDatabaseConnected()) {
+    return res.status(503).json({ 
+      msg: 'Database not available. Please try again later.',
+      error: 'SERVICE_UNAVAILABLE'
+    });
+  }
+  
   try {
     // Find the user by email
     const user = await User.findOne({ email });
