@@ -928,113 +928,18 @@ const assets = [
   { symbol: 'COPPER', market: 'commodities', priority: 'low' },
 ];
 
-// Enhanced price fetching with fallback mechanisms
-const forexService = require('./services/forexService');
-const commoditiesService = require('./services/commoditiesService');
+// Declare interval variables at the top to avoid temporal dead zone issues
+let priceHistoryInterval;
+let signalGenerationInterval;
 
-// Enhanced price fetching with new services
-async function fetchLatestPriceEnhanced(symbol, market) {
-  const maxRetries = 3;
-  let lastError = null;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`📈 Fetching ${symbol} (${market}) - Attempt ${attempt}`);
-      
-      if (market === 'crypto') {
-        // Crypto logic (keep your existing code)
-        try {
-          const url = `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`;
-          const response = await fetch(url, { timeout: 8000 });
-          if (!response.ok) throw new Error(`Binance API error: ${response.status}`);
-          const data = await response.json();
-          if (data.price) {
-            console.log(`✅ ${symbol}: ${data.price} (Binance)`);
-            return parseFloat(data.price);
-          }
-        } catch (binanceError) {
-          console.warn(`⚠️ Binance failed for ${symbol}:`, binanceError.message);
-          
-          // Fallback: CoinGecko
-          const coinId = getCoinGeckoId(symbol);
-          if (coinId) {
-            const url = `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`;
-            const response = await fetch(url, { timeout: 8000 });
-            const data = await response.json();
-            if (data[coinId]?.usd) {
-              console.log(`✅ ${symbol}: ${data[coinId].usd} (CoinGecko)`);
-              return data[coinId].usd;
-            }
-          }
-        }
-      } 
-      
-      else if (market === 'forex') {
-        // Use new forex service
-        const base = symbol.slice(0, 3);
-        const quote = symbol.slice(3, 6);
-        const result = await forexService.getExchangeRate(base, quote);
-        console.log(`✅ ${symbol}: ${result.rate} (${result.source})`);
-        return result.rate;
-      }
-      
-      else if (market === 'stocks') {
-        // Enhanced stock fetching (keep your existing Alpha Vantage + Yahoo logic)
-        if (process.env.ALPHA_VANTAGE_KEY) {
-          try {
-            const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${process.env.ALPHA_VANTAGE_KEY}`;
-            const response = await fetch(url, { timeout: 10000 });
-            const data = await response.json();
-            const price = data['Global Quote']?.['05. price'];
-            if (price) {
-              console.log(`✅ ${symbol}: ${price} (Alpha Vantage)`);
-              return parseFloat(price);
-            }
-          } catch (stockError) {
-            console.warn(`⚠️ Alpha Vantage stocks failed for ${symbol}:`, stockError.message);
-          }
-        }
-        
-        // Fallback: Yahoo Finance
-        try {
-          const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbol}`;
-          const response = await fetch(url, { timeout: 8000 });
-          const data = await response.json();
-          const price = data.quoteResponse?.result?.[0]?.regularMarketPrice;
-          if (price) {
-            console.log(`✅ ${symbol}: ${price} (Yahoo Finance)`);
-            return price;
-          }
-        } catch (yahooError) {
-          console.warn(`⚠️ Yahoo Finance failed for ${symbol}:`, yahooError.message);
-        }
-      }
-      
-      else if (market === 'commodities') {
-        // Use new commodities service
-        const result = await commoditiesService.getCommodityPrice(symbol);
-        console.log(`✅ ${symbol}: ${result.price} (${result.source})`);
-        return result.price;
-      }
-      
-    } catch (error) {
-      lastError = error;
-      console.error(`❌ Attempt ${attempt} failed for ${symbol}:`, error.message);
-      
-      if (attempt < maxRetries) {
-        const delay = attempt * 2000; // Exponential backoff
-        console.log(`⏳ Retrying ${symbol} in ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
+// --- Enhanced signal generation function ---
+async function generateSignals() {
+  if (mongoose.connection.readyState !== 1) {
+    console.log('MongoDB not connected - skipping signal generation');
+    return;
   }
-  
-  console.error(`❌ All attempts failed for ${symbol}:`, lastError?.message);
-  return null;
-}
-// Enhanced price history updater with better error handling
-const priceHistoryInterval = setInterval(async () => {
-  console.log('🔄 Updating price histories...');
+
+  console.log('🤖 Starting signal generation...');
   
   // Process high priority assets first
   const highPriorityAssets = assets.filter(asset => asset.priority === 'high');
@@ -1157,213 +1062,313 @@ const signalGenerationInterval = setInterval(async () => {
     }
   }
   
-  console.log(`🎯 Signal generation completed: ${signalsGenerated} signals generated`);
-  
-  // Update performance tracking
-  await trackSignalPerformance();
-  
-}, 2 * 60 * 1000); // Every 2 minutes
-
-// Enhanced technical analysis function
-async function performEnhancedTechnicalAnalysis(priceHistory, asset) {
-  const prices = priceHistory.slice(-30); // Use last 30 prices
-  const currentPrice = prices[prices.length - 1];
-  const previousPrice = prices[prices.length - 2];
-  
-  // Calculate multiple technical indicators
-  const sma5 = calculateSMA(prices, 5);
-  const sma10 = calculateSMA(prices, 10);
-  const sma20 = calculateSMA(prices, 20);
-  const ema12 = calculateEMA(prices, 12);
-  const ema26 = calculateEMA(prices, 26);
-  const rsi = calculateRSI(prices, 14);
-  const macd = calculateMACD(prices);
-  const bollinger = calculateBollingerBands(prices, 20, 2);
-  const stochastic = calculateStochastic(prices, 14);
-  const volume = generateVolumeIndicator(asset.market);
-  
-  // Market-specific adjustments
-  const marketMultiplier = getMarketMultiplier(asset.market);
-  const volatility = calculateVolatility(prices);
-  
-  // Signal strength calculation
-  let bullishSignals = 0;
-  let bearishSignals = 0;
-  let signalStrength = 0;
-  
-  // Moving Average Signals
-  if (currentPrice > sma5 && sma5 > sma10 && sma10 > sma20) {
-    bullishSignals += 2;
-    signalStrength += 15;
-  }
-  if (currentPrice < sma5 && sma5 < sma10 && sma10 < sma20) {
-    bearishSignals += 2;
-    signalStrength += 15;
-  }
-  
-  // MACD Signals
-  if (macd.macd > macd.signal && macd.histogram > 0) {
-    bullishSignals += 1;
-    signalStrength += 10;
-  }
-  if (macd.macd < macd.signal && macd.histogram < 0) {
-    bearishSignals += 1;
-    signalStrength += 10;
-  }
-  
-  // RSI Signals
-  if (rsi < 30) {
-    bullishSignals += 1; // Oversold
-    signalStrength += 8;
-  }
-  if (rsi > 70) {
-    bearishSignals += 1; // Overbought
-    signalStrength += 8;
-  }
-  
-  // Bollinger Bands
-  if (currentPrice < bollinger.lower) {
-    bullishSignals += 1;
-    signalStrength += 7;
-  }
-  if (currentPrice > bollinger.upper) {
-    bearishSignals += 1;
-    signalStrength += 7;
-  }
-  
-  // Stochastic
-  if (stochastic.k < 20 && stochastic.d < 20) {
-    bullishSignals += 1;
-    signalStrength += 6;
-  }
-  if (stochastic.k > 80 && stochastic.d > 80) {
-    bearishSignals += 1;
-    signalStrength += 6;
-  }
-  
-  // Price momentum
-  const priceChange = ((currentPrice - previousPrice) / previousPrice) * 100;
-  if (Math.abs(priceChange) > 0.5) {
-    signalStrength += 5;
-  }
-  
-  // Volume confirmation (simulated)
-  if (volume > 1.2) {
-    signalStrength += 8;
-  }
-  
-  // Determine signal type and confidence
-  let signalType = null;
-  let confidence = 0;
-  
-  if (bullishSignals > bearishSignals && bullishSignals >= 2) {
-    signalType = 'BUY';
-    confidence = Math.min(95, 50 + signalStrength * marketMultiplier);
-  } else if (bearishSignals > bullishSignals && bearishSignals >= 2) {
-    signalType = 'SELL';
-    confidence = Math.min(95, 50 + signalStrength * marketMultiplier);
-  }
-  
-  // Apply volatility adjustment
-  if (volatility > 0.05) {
-    confidence *= 0.9; // Reduce confidence in high volatility
-  }
-  
-  // Market-specific confidence adjustments
-  if (asset.market === 'crypto') {
-    confidence *= 0.95; // Crypto is more volatile
-  } else if (asset.market === 'forex') {
-    confidence *= 1.05; // Forex is more predictable
-  }
-  
-  const shouldGenerateSignal = signalType && confidence >= 60 && signalStrength >= 25;
-  
-  return {
-    shouldGenerateSignal,
-    signalType,
-    confidence: Math.round(confidence),
-    signalStrength,
-    indicators: {
-      sma5, sma10, sma20, ema12, ema26, rsi, macd, bollinger, stochastic, volume
-    },
-    analysis: {
-      bullishSignals,
-      bearishSignals,
-      volatility,
-      priceChange,
-      currentPrice
-    }
-  };
+  console.log('🎯 Signal generation completed');
 }
 
-// Enhanced signal generation
-async function generateEnhancedSignal(asset, analysis) {
+// --- Start price history updater ---
+priceHistoryInterval = setInterval(async () => {
+  console.log('🔄 Starting price history update...');
+  
+  for (let i = 0; i < assets.length; i++) {
+    const asset = assets[i];
+    
+    try {
+      // Add delay between requests to respect rate limits
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between assets
+      }
+      
+      const price = await fetchLatestPriceWithRetry(asset.symbol, asset.market);
+      if (!price) {
+        console.log(`⚠️ Skipping ${asset.symbol} - no price data available`);
+        continue;
+      }
+      
+      if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
+      priceHistories[asset.symbol].push(price);
+      
+      // Keep only the last 30 prices
+      if (priceHistories[asset.symbol].length > 30) {
+        priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-30);
+      }
+      
+      console.log(`✅ Updated ${asset.symbol}: $${price} (${priceHistories[asset.symbol].length} points)`);
+    } catch (error) {
+      console.error(`Error updating price history for ${asset.symbol}:`, error.message);
+    }
+  }
+  
+  console.log('✅ Price history update completed');
+}, 2 * 60 * 1000); // every 2 minutes
+
+// --- Start signal generation ---
+signalGenerationInterval = setInterval(generateSignals, 15 * 60 * 1000); // every 15 minutes
+
+// --- Signals API Endpoint ---
+app.get('/api/signals', async (req, res) => {
   try {
-    const currentPrice = analysis.analysis.currentPrice;
-    const volatility = analysis.analysis.volatility;
-    
-    // Calculate dynamic stop loss and take profit based on volatility and market
-    let stopLossPercent, takeProfitPercent;
-    
-    switch (asset.market) {
-      case 'crypto':
-        stopLossPercent = Math.max(2, volatility * 100 * 0.8);
-        takeProfitPercent = Math.max(4, volatility * 100 * 1.5);
-        break;
-      case 'forex':
-        stopLossPercent = Math.max(0.5, volatility * 100 * 0.6);
-        takeProfitPercent = Math.max(1, volatility * 100 * 1.2);
-        break;
-      case 'stocks':
-        stopLossPercent = Math.max(1.5, volatility * 100 * 0.7);
-        takeProfitPercent = Math.max(3, volatility * 100 * 1.3);
-        break;
-      case 'commodities':
-        stopLossPercent = Math.max(1, volatility * 100 * 0.75);
-        takeProfitPercent = Math.max(2, volatility * 100 * 1.4);
-        break;
-      default:
-        stopLossPercent = 2;
-        takeProfitPercent = 4;
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: 'Database not connected' });
     }
     
-    // Calculate prices
-    let entryPrice, targetPrice, stopLoss;
+    const signals = await Signal.find({ status: 'active' });
+    res.json({ signals });
+  } catch (err) {
+    console.error('Error fetching signals:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+// Add this RIGHT AFTER your existing /api/signals route
+console.log('📈 Adding price endpoints...');
+
+// Single price endpoint
+app.get('/api/price/:symbol', async (req, res) => {
+  try {
+    const { symbol } = req.params;
+    console.log(`📈 Fetching price for ${symbol}`);
     
-    if (analysis.signalType === 'BUY') {
-      entryPrice = currentPrice;
-      targetPrice = currentPrice * (1 + takeProfitPercent / 100);
-      stopLoss = currentPrice * (1 - stopLossPercent / 100);
-    } else {
-      entryPrice = currentPrice;
-      targetPrice = currentPrice * (1 - takeProfitPercent / 100);
-      stopLoss = currentPrice * (1 + stopLossPercent / 100);
-    }
+    const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, {
+      timeout: 10000
+    });
     
-    // Generate timeframe based on confidence and market
-    const timeframes = ['15M', '1H', '4H', '1D'];
-    let timeframe;
-    if (analysis.confidence >= 85) timeframe = '1D';
-    else if (analysis.confidence >= 75) timeframe = '4H';
-    else if (analysis.confidence >= 65) timeframe = '1H';
-    else timeframe = '15M';
+    const price = Number(response.data.price);
+    console.log(`✅ Got price for ${symbol}: $${price}`);
     
-    // Generate description
-    const description = generateSignalDescription(asset, analysis);
+    res.json({ 
+      symbol, 
+      price,
+      timestamp: new Date().toISOString()
+    });
     
-    const signalData = {
-      symbol: asset.symbol,
-      market: asset.market,
-      type: analysis.signalType,
-      confidence: analysis.confidence,
-      entryPrice:currentPrice,
-      targetPrice,
-      stopLoss,
-      timeframe,
-    }
-    
-    return signalData;
   } catch (error) {
-    throw error;
+    console.error(`❌ Price fetch failed for ${req.params.symbol}:`, error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch price',
+      symbol: req.params.symbol,
+      message: error.message
+    });
+  }
+});
+
+// Bulk prices endpoint
+app.post('/api/prices', async (req, res) => {
+  try {
+    const { symbols } = req.body;
+    console.log(`📈 Backend fetching prices for symbols:`, symbols);
+    
+    const prices = {};
+    
+    for (const symbol of symbols) {
+      try {
+        const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, {
+          timeout: 5000
+        });
+        prices[symbol] = Number(response.data.price);
+        console.log(`✅ ${symbol}: $${prices[symbol]}`);
+      } catch (error) {
+        console.error(`❌ Failed to fetch ${symbol}:`, error.message);
+        prices[symbol] = null;
+      }
+    }
+    
+    res.json({ 
+      prices,
+      timestamp: new Date().toISOString(),
+      source: 'binance'
+    });
+    
+  } catch (error) {
+    console.error('❌ Bulk price fetch failed:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch prices',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+console.log('✅ Price endpoints added');
+// Fetch historical close prices from Binance (for crypto symbols)
+async function getPriceHistory(symbol, length = 50) {
+  try {
+    // Binance expects symbols like BTCUSDT, ETHUSDT, etc.
+    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=${length}`;
+    const response = await fetch(url, { timeout: 10000 });
+    const data = await response.json();
+    
+    if (!Array.isArray(data)) return [];
+    
+    // Each item: [openTime, open, high, low, close, ...]
+    return data.map(item => parseFloat(item[4])); // close prices
+  } catch (error) {
+    console.error(`Error fetching price history for ${symbol}:`, error.message);
+    return [];
   }
 }
+
+// --- Demo Position Monitoring Job ---
+let monitorDemoPositions;
+let demoMonitorInterval;
+try {
+  const demoMonitor = require('./jobs/demoPositionMonitor');
+  monitorDemoPositions = demoMonitor.monitorDemoPositions;
+  console.log('✅ Demo position monitor loaded');
+} catch (error) {
+  console.error('⚠️ Demo position monitor not found:', error.message);
+  // Create a mock function to prevent crashes
+  monitorDemoPositions = () => console.log('Demo position monitoring skipped - module not found');
+}
+
+// Start the monitoring interval regardless of whether the module was found
+demoMonitorInterval = setInterval(monitorDemoPositions, 60 * 1000); // every minute
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('❌ Server Error:', err.message);
+  console.error('Stack:', err.stack);
+  
+  res.status(err.status || 500).json({
+    error: process.env.NODE_ENV === 'production' 
+      ? 'Internal Server Error' 
+      : err.message,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    error: 'Route not found',
+    path: req.originalUrl,
+    method: req.method,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// --- Graceful Shutdown ---
+const gracefulShutdown = async (signal) => {
+  console.log(`\n📴 Received ${signal}. Shutting down gracefully...`);
+  
+  // Clear all intervals
+  clearInterval(priceHistoryInterval);
+  clearInterval(signalGenerationInterval);
+  clearInterval(marketUpdateInterval);
+  clearInterval(portfolioUpdateInterval);
+  clearInterval(demoMonitorInterval);
+  
+  // Close WebSocket server
+  wss.close(() => {
+    console.log('🔌 WebSocket server closed');
+  });
+  
+  // Close HTTP server
+  server.close(async () => {
+    console.log('🔌 HTTP server closed');
+    
+    try {
+      await mongoose.connection.close();
+      console.log('🗄️ MongoDB connection closed');
+    } catch (error) {
+      console.error('❌ Error closing MongoDB:', error.message);
+    }
+    
+    console.log('👋 Goodbye!');
+    process.exit(0);
+  });
+
+  // Force close after 10 seconds
+  setTimeout(() => {
+    console.error('❌ Could not close connections in time, forcefully shutting down');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// Global error handlers
+process.on('unhandledRejection', (err, promise) => {
+  console.error('❌ Unhandled Promise Rejection:', err.message);
+  if (process.env.NODE_ENV !== 'development') {
+    console.error('Stack:', err.stack);
+    // Don't exit in development to prevent crashes during debugging
+    process.exit(1);
+  }
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err.message);
+  console.error('Stack:', err.stack);
+  process.exit(1);
+});
+
+// Handle Windows CTRL+C
+if (process.platform === "win32") {
+  const rl = require("readline").createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  rl.on("SIGINT", () => {
+    process.emit("SIGINT");
+  });
+}
+
+// --- Start the Server ---
+const PORT = process.env.PORT || 5000;
+
+const startServer = async () => {
+  try {
+    server.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`🌐 Health check: http://localhost:${PORT}/api/health`);
+      console.log(`📊 Market data: http://localhost:${PORT}/api/market/data`);
+      console.log(`📈 Signals: http://localhost:${PORT}/api/signals`);
+      console.log(`💼 Portfolio: http://localhost:${PORT}/api/portfolio`);
+      console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`📅 Started at: ${new Date().toISOString()}`);
+      
+      // API Key status
+      console.log('\n🔑 API Key Status:');
+      console.log(`Alpha Vantage: ${ALPHA_VANTAGE_KEY ? '✅ Available' : '❌ Missing'}`);
+      console.log(`Twelve Data: ${TWELVE_DATA_KEY ? '✅ Available' : '❌ Missing'}`);
+      console.log(`News API: ${process.env.NEWS_API_KEY ? '✅ Available' : '❌ Missing'}`);
+      
+      // Service status
+      console.log('\n🔧 Service Status:');
+      console.log(`MongoDB: ${mongoose.connection.readyState === 1 ? '✅ Connected' : '❌ Disconnected'}`);
+      console.log(`WebSocket: ✅ Running`);
+      console.log(`Price Updates: ✅ Every 5 seconds`);
+      console.log(`Market Updates: ✅ Every 5 minutes`);
+      console.log(`Portfolio Updates: ✅ Every 5 minutes`);
+      console.log(`Signal Generation: ✅ Every 15 minutes`);
+      console.log(`Demo Position Monitor: ✅ Every minute`);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error.message);
+    
+    // Provide helpful troubleshooting information
+    if (error.message.includes('EADDRINUSE')) {
+      console.log('\n🔧 Port already in use:');
+      console.log(`Kill the process using port ${PORT} or use a different port`);
+      console.log(`Try: lsof -ti:${PORT} | xargs kill -9`);
+    }
+    
+    process.exit(1);
+  }
+};
+
+// Start the server
+console.log('🚀 Starting Apterra Trading App Backend...');
+console.log('📅 Startup Time:', new Date().toISOString());
+console.log('🌍 Current IP: 197.248.68.197 (Add to MongoDB whitelist if needed)');
+
+startServer();
+
+// API key warnings
+if (!ALPHA_VANTAGE_KEY) console.warn('⚠️ Alpha Vantage API key missing - forex/stocks data limited');
+if (!TWELVE_DATA_KEY) console.warn('⚠️ Twelve Data API key missing - commodities data limited');
+if (!process.env.NEWS_API_KEY) console.warn('⚠️ News API key missing - sentiment analysis disabled');
+
+// Export app for testing
+module.exports = app;
