@@ -298,209 +298,20 @@ app.get('/api/status/apis', (req, res) => {
   });
 });
 
-console.log('📈 Starting enhanced price update service...');
-
-// Helper function to get CoinGecko ID from symbol
-const getCoinGeckoId = (symbol) => {
-  const mapping = {
-    'BTCUSDT': 'bitcoin',
-    'ETHUSDT': 'ethereum',
-    'BNBUSDT': 'binancecoin',
-    'ADAUSDT': 'cardano',
-    'SOLUSDT': 'solana',
-    'XRPUSDT': 'ripple',
-    'DOTUSDT': 'polkadot',
-    'LINKUSDT': 'chainlink',
-    'AVAXUSDT': 'avalanche-2',
-    'MATICUSDT': 'matic-network'
-  };
-  return mapping[symbol];
+// Update your price update interval
+const startPriceUpdates = () => {
+  console.log('📈 Starting enhanced price update service...');
+  
+  // Initial update
+  marketService.updatePrices();
+  
+  // Regular updates every 30 seconds (instead of 5 seconds to respect rate limits)
+  setInterval(async () => {
+    await marketService.updatePrices();
+  }, 30000);
 };
 
-// Define the updatePrices function
-const updatePrices = async () => {
-  try {
-    console.log('🔄 Starting price update cycle...');
-    
-    // Get symbols to fetch
-    const symbols = TRADING_ASSETS.map(asset => asset.symbol);
-    console.log(`🔍 Fetching prices for: ${symbols.join(', ')}`);
-    
-    const results = await fetchPricesFromMultipleAPIs(symbols);
-    
-    if (results.length > 0) {
-      // Save to database
-      await savePricesToDatabase(results);
-      console.log(`✅ Updated ${results.length} prices successfully`);
-      
-      // Update price histories
-      await updatePriceHistories();
-      
-      // Emit to connected clients if io is available
-      if (typeof io !== 'undefined') {
-        io.emit('priceUpdate', results);
-        io.emit('portfolioUpdate', { message: 'Portfolio data updated' });
-        io.emit('marketDataUpdate', { message: 'Market data updated' });
-      }
-    } else {
-      console.log('⚠️ No prices were updated this cycle');
-    }
-    
-  } catch (error) {
-    console.error('❌ Error in updatePrices:', error.message);
-  }
-};
-
-// Define the updatePriceHistories function
-const updatePriceHistories = async () => {
-  try {
-    console.log('🔄 Updating price histories...');
-    
-    for (const asset of TRADING_ASSETS) {
-      try {
-        console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 1`);
-        
-        let price = null;
-        let source = 'unknown';
-        
-        // Try different APIs based on market type
-        if (asset.market === 'crypto') {
-          // Try Binance first for crypto
-          try {
-            const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${asset.symbol}`, {
-              timeout: 5000
-            });
-            price = parseFloat(response.data.price);
-            source = 'Binance';
-          } catch (error) {
-            console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 2`);
-            // Fallback to CoinGecko mapping
-            const coinGeckoId = getCoinGeckoId(asset.symbol);
-            if (coinGeckoId) {
-              try {
-                const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd`, {
-                  timeout: 5000
-                });
-                price = response.data[coinGeckoId]?.usd;
-                source = 'CoinGecko';
-              } catch (cgError) {
-                console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 3`);
-              }
-            }
-          }
-        } else if (asset.market === 'forex') {
-          // Try forex API
-          const base = asset.symbol.slice(0, 3);
-          const quote = asset.symbol.slice(3, 6);
-          
-          try {
-            const response = await axios.get(`https://api.fxratesapi.com/latest?base=${base}&symbols=${quote}`, {
-              timeout: 5000
-            });
-            price = response.data.rates[quote];
-            source = 'fxratesapi.com';
-          } catch (error) {
-            console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 2`);
-            try {
-              const response = await axios.get(`https://api.exchangerate.host/latest?base=${base}&symbols=${quote}`, {
-                timeout: 5000
-              });
-              price = response.data.rates[quote];
-              source = 'exchangerate.host';
-            } catch (error2) {
-              console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 3`);
-            }
-          }
-        } else if (asset.market === 'stocks') {
-          // Try Alpha Vantage for stocks
-          try {
-            const response = await axios.get(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${asset.symbol}&apikey=demo`, {
-              timeout: 10000
-            });
-            price = parseFloat(response.data['Global Quote']?.['05. price']);
-            source = 'Alpha Vantage';
-          } catch (error) {
-            console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 2`);
-            try {
-              const response = await axios.get(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${asset.symbol}`, {
-                timeout: 5000
-              });
-              price = response.data.quoteResponse.result[0]?.regularMarketPrice;
-              source = 'Yahoo Finance';
-            } catch (error2) {
-              console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 3`);
-            }
-          }
-        } else if (asset.market === 'commodities') {
-          // Use fallback prices for commodities
-          const fallbackPrices = {
-            'GOLD': 2650 + (Math.random() - 0.5) * 20,
-            'OIL': 68.5 + (Math.random() - 0.5) * 5,
-            'SILVER': 31.5 + (Math.random() - 0.5) * 2,
-            'COPPER': 4.15 + (Math.random() - 0.5) * 0.3
-          };
-          
-          try {
-            const response = await axios.get(`https://api.metals.live/v1/spot/${asset.symbol.toLowerCase()}`, {
-              timeout: 5000
-            });
-            price = response.data.price;
-            source = 'metals.live';
-          } catch (error) {
-            console.log(`⚠️ Commodity API failed for ${asset.symbol}: ${error.message}`);
-            price = fallbackPrices[asset.symbol] || 100;
-            source = 'fallback';
-            console.log(`📊 Using fallback price for ${asset.symbol}: ${price}`);
-          }
-        }
-        
-        if (price && !isNaN(price) && price > 0) {
-          // Save to price history
-          const priceHistory = new PriceHistory({
-            symbol: asset.symbol,
-            price: price,
-            timestamp: new Date(),
-            market: asset.market,
-            source: source
-          });
-          
-          await priceHistory.save();
-          
-          console.log(`✅ ${asset.symbol}: ${price} (${source})`);
-          
-          // Get count of price points for this symbol
-          const count = await PriceHistory.countDocuments({ symbol: asset.symbol });
-          console.log(`📊 ${asset.symbol}: ${count} price points`);
-          
-        } else {
-          console.log(`❌ All attempts failed for ${asset.symbol}: ${price}`);
-        }
-        
-      } catch (error) {
-        console.error(`❌ Error fetching ${asset.symbol}:`, error.message);
-      }
-    }
-    
-    console.log('✅ Price history update completed');
-    
-  } catch (error) {
-    console.error('❌ Error updating price histories:', error.message);
-  }
-};
-
-// Now set up the intervals AFTER the functions are defined
-console.log('⏰ Setting up intervals...');
-
-// Start price updates every 30 seconds
-priceUpdateInterval = setInterval(updatePrices, 30 * 1000);
-
-// Start signal generation every 2 minutes  
-signalGenerationInterval = setInterval(generateSignals, 2 * 60 * 1000);
-
-// Initial calls
-console.log('🚀 Starting initial updates...');
-updatePrices();
-setTimeout(generateSignals, 5000); // Wait 5 seconds before first signal generation
+// Price updates will be started by startIntervals() function
 
 // --- Market Data Endpoint & Update ---
 app.get('/api/market/data', async (req, res) => {
@@ -547,9 +358,7 @@ async function updateMarketData() {
   }
 }
 
-const marketUpdateInterval = setInterval(updateMarketData, 5 * 60 * 1000);
-// Initial update after 10 seconds
-setTimeout(updateMarketData, 10 * 1000);
+// Market update interval will be started by startIntervals() function
 
 // --- Portfolio Endpoints & Update ---
 app.get('/api/portfolio', async (req, res) => {
@@ -591,8 +400,7 @@ async function updatePortfolioData() {
   }
 }
 
-const portfolioUpdateInterval = setInterval(updatePortfolioData, 5 * 60 * 1000);
-setTimeout(updatePortfolioData, 10 * 1000);
+// Portfolio update interval will be started by startIntervals() function
 
 // --- AI Signal Generation ---
 // Deep learning prediction and sentiment analysis functions
@@ -1075,45 +883,69 @@ const assets = [
 // Declare interval variables at the top to avoid temporal dead zone issues
 let priceHistoryInterval;
 let signalGenerationInterval;
+let demoMonitorInterval;
+let marketUpdateInterval;
+let portfolioUpdateInterval;
 
-// --- Start price history updater ---
-priceHistoryInterval = setInterval(async () => {
-  console.log('🔄 Starting price history update...');
+// --- Function to start all intervals (called after server starts) ---
+function startIntervals() {
+  console.log('🔄 Initializing all intervals and services...');
   
-  for (let i = 0; i < assets.length; i++) {
-    const asset = assets[i];
+  // Start price update service
+  startPriceUpdates();
+  
+  // Start price history updater
+  priceHistoryInterval = setInterval(async () => {
+    console.log('🔄 Starting price history update...');
     
-    try {
-      // Add delay between requests to respect rate limits
-      if (i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between assets
+    for (let i = 0; i < assets.length; i++) {
+      const asset = assets[i];
+      
+      try {
+        // Add delay between requests to respect rate limits
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between assets
+        }
+        
+        const price = await fetchLatestPriceWithRetry(asset.symbol, asset.market);
+        if (!price) {
+          console.log(`⚠️ Skipping ${asset.symbol} - no price data available`);
+          continue;
+        }
+        
+        if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
+        priceHistories[asset.symbol].push(price);
+        
+        // Keep only the last 30 prices
+        if (priceHistories[asset.symbol].length > 30) {
+          priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-30);
+        }
+        
+        console.log(`✅ Updated ${asset.symbol} (${asset.market}): $${price} (${priceHistories[asset.symbol].length} points)`);
+      } catch (error) {
+        console.error(`Error updating price history for ${asset.symbol}:`, error.message);
       }
-      
-      const price = await fetchLatestPriceWithRetry(asset.symbol, asset.market);
-      if (!price) {
-        console.log(`⚠️ Skipping ${asset.symbol} - no price data available`);
-        continue;
-      }
-      
-      if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
-      priceHistories[asset.symbol].push(price);
-      
-      // Keep only the last 30 prices
-      if (priceHistories[asset.symbol].length > 30) {
-        priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-30);
-      }
-      
-      console.log(`✅ Updated ${asset.symbol} (${asset.market}): $${price} (${priceHistories[asset.symbol].length} points)`);
-    } catch (error) {
-      console.error(`Error updating price history for ${asset.symbol}:`, error.message);
     }
-  }
-  
-  console.log('✅ Price history update completed');
-}, 2 * 60 * 1000); // every 2 minutes
+    
+    console.log('✅ Price history update completed');
+  }, 2 * 60 * 1000); // every 2 minutes
 
-// --- Start signal generation ---
-signalGenerationInterval = setInterval(generateSignals, 15 * 60 * 1000); // every 15 minutes
+  // Start signal generation
+  signalGenerationInterval = setInterval(generateSignals, 15 * 60 * 1000); // every 15 minutes
+  
+  // Start demo monitoring interval
+  demoMonitorInterval = setInterval(monitorDemoPositions, 60 * 1000); // every minute
+  
+  // Start market update interval
+  marketUpdateInterval = setInterval(updateMarketData, 5 * 60 * 1000);
+  setTimeout(updateMarketData, 10 * 1000); // Initial update after 10 seconds
+  
+  // Start portfolio update interval
+  portfolioUpdateInterval = setInterval(updatePortfolioData, 5 * 60 * 1000);
+  setTimeout(updatePortfolioData, 10 * 1000); // Initial update after 10 seconds
+  
+  console.log('✅ All intervals started successfully');
+}
 
 // --- Signals API Endpoint ---
 app.get('/api/signals', async (req, res) => {
@@ -1230,8 +1062,7 @@ try {
   monitorDemoPositions = () => console.log('Demo position monitoring skipped - module not found');
 }
 
-// Start the monitoring interval regardless of whether the module was found
-demoMonitorInterval = setInterval(monitorDemoPositions, 60 * 1000); // every minute
+// Demo monitoring interval will be started by startIntervals() function
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -1354,6 +1185,11 @@ const startServer = async () => {
       console.log(`Portfolio Updates: ✅ Every 5 minutes`);
       console.log(`Signal Generation: ✅ Every 15 minutes`);
       console.log(`Demo Position Monitor: ✅ Every minute`);
+      
+      // Start intervals after server is fully initialized
+      setTimeout(() => {
+        startIntervals();
+      }, 3000); // Wait 3 seconds for everything to be fully initialized
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);
