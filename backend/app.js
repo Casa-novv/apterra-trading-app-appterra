@@ -888,7 +888,7 @@ let marketUpdateInterval;
 let portfolioUpdateInterval;
 
 // --- Function to start all intervals (called after server starts) ---
-function startIntervals() {
+const startIntervals = () => {
   console.log('🔄 Initializing all intervals and services...');
   
   // Start price update service
