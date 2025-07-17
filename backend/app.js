@@ -8,10 +8,11 @@ const WebSocket = require('ws');
 const fetch = require('node-fetch');
 const axios = require('axios');
 // Instead of ta, we use technicalindicators:
-const { RSI, MACD } = require('technicalindicators');
+const { RSI, MACD, Stochastic, BollingerBands } = require('technicalindicators');
 const jwt = require('jsonwebtoken');
 const Sentiment = require('sentiment');
 const tf = require('@tensorflow/tfjs');
+const nodemailer = require('nodemailer'); // For notifications
 
 const app = express();
 
@@ -153,7 +154,11 @@ app.get('/api/health', (req, res) => {
     ] : []
   });
 });
+// At the very top of your file (after imports but before any other code)
+let priceUpdateInterval;
 
+// Import Mongoose models with error handling
+let Signal, Market, Portfolio;
 try {
   Signal = require('./models/Signal');     // AI signals
   Market = require('./models/Market');       // Market data
@@ -325,29 +330,369 @@ app.get('/api/status/apis', (req, res) => {
   });
 });
 
-// Update your price update interval
-let priceUpdateInterval;
-const startPriceUpdates = () => {
-  console.log('📈 Starting enhanced price update service...');
-  
+console.log('📈 Starting enhanced price update service...');
+
+// Helper function to get CoinGecko ID from symbol
+const getCoinGeckoId = (symbol) => {
+  const mapping = {
+    'BTCUSDT': 'bitcoin',
+    'ETHUSDT': 'ethereum',
+    'BNBUSDT': 'binancecoin',
+    'ADAUSDT': 'cardano',
+    'SOLUSDT': 'solana',
+    'XRPUSDT': 'ripple',
+    'DOTUSDT': 'polkadot',
+    'LINKUSDT': 'chainlink',
+    'AVAXUSDT': 'avalanche-2',
+    'MATICUSDT': 'matic-network'
+  };
+  return mapping[symbol];
+};
+
+// Define the updatePrices function
+const updatePrices = async () => {
   try {
-    // Initial update
-    if (marketService && typeof marketService.updatePrices === 'function') {
-      marketService.updatePrices();
+    console.log('🔄 Starting price update cycle...');
+    
+    // Get symbols to fetch
+    const symbols = assets.map(asset => asset.symbol);
+    console.log(`🔍 Fetching prices for: ${symbols.join(', ')}`);
+    
+    const results = await fetchPricesFromMultipleAPIs(symbols);
+    
+    if (results.length > 0) {
+      // Save to database
+      await savePricesToDatabase(results);
+      console.log(`✅ Updated ${results.length} prices successfully`);
       
-      // Regular updates every 30 seconds (instead of 5 seconds to respect rate limits)
-      priceUpdateInterval = setInterval(async () => {
-        await marketService.updatePrices();
-      }, 30000);
+      // Update price histories
+      await updatePriceHistories();
+      
+      // Emit to connected clients if io is available
+      if (typeof io !== 'undefined') {
+        io.emit('priceUpdate', results);
+        io.emit('portfolioUpdate', { message: 'Portfolio data updated' });
+        io.emit('marketDataUpdate', { message: 'Market data updated' });
+      }
     } else {
       console.error('⚠️ marketService.updatePrices is not available');
     }
   } catch (error) {
-    console.error('❌ Error starting price update service:', error.message);
+    console.error('❌ Error in updatePrices:', error.message);
   }
 };
 
-// Price updates will be started by startIntervals() function
+// Define the updatePriceHistories function
+const updatePriceHistories = async () => {
+  try {
+    console.log('🔄 Updating price histories...');
+    
+    for (const asset of assets) {
+      try {
+        console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 1`);
+        
+        let price = null;
+        let source = 'unknown';
+        
+        // Try different APIs based on market type
+        if (asset.market === 'crypto') {
+          // Try Binance first for crypto
+          try {
+            const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${asset.symbol}`, {
+              timeout: 5000
+            });
+            price = parseFloat(response.data.price);
+            source = 'Binance';
+          } catch (error) {
+            console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 2`);
+            // Fallback to CoinGecko mapping
+            const coinGeckoId = getCoinGeckoId(asset.symbol);
+            if (coinGeckoId) {
+              try {
+                const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${coinGeckoId}&vs_currencies=usd`, {
+                  timeout: 5000
+                });
+                price = response.data[coinGeckoId]?.usd;
+                source = 'CoinGecko';
+              } catch (cgError) {
+                console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 3`);
+              }
+            }
+          }
+        } else if (asset.market === 'forex') {
+          // Try forex API
+          const base = asset.symbol.slice(0, 3);
+          const quote = asset.symbol.slice(3, 6);
+          
+          try {
+            const response = await axios.get(`https://api.fxratesapi.com/latest?base=${base}&symbols=${quote}`, {
+              timeout: 5000
+            });
+            price = response.data.rates[quote];
+            source = 'fxratesapi.com';
+          } catch (error) {
+            console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 2`);
+            try {
+              const response = await axios.get(`https://api.exchangerate.host/latest?base=${base}&symbols=${quote}`, {
+                timeout: 5000
+              });
+              price = response.data.rates[quote];
+              source = 'exchangerate.host';
+            } catch (error2) {
+              console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 3`);
+            }
+          }
+        } else if (asset.market === 'stocks') {
+          // Try Alpha Vantage for stocks
+          try {
+            const response = await axios.get(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${asset.symbol}&apikey=demo`, {
+              timeout: 10000
+            });
+            price = parseFloat(response.data['Global Quote']?.['05. price']);
+            source = 'Alpha Vantage';
+          } catch (error) {
+            console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 2`);
+            try {
+              const response = await axios.get(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${asset.symbol}`, {
+                timeout: 5000
+              });
+              price = response.data.quoteResponse.result[0]?.regularMarketPrice;
+              source = 'Yahoo Finance';
+            } catch (error2) {
+              console.log(`📈 Fetching ${asset.symbol} (${asset.market}) - Attempt 3`);
+            }
+          }
+        } else if (asset.market === 'commodities') {
+          // Use fallback prices for commodities
+          const fallbackPrices = {
+            'GOLD': 2650 + (Math.random() - 0.5) * 20,
+            'OIL': 68.5 + (Math.random() - 0.5) * 5,
+            'SILVER': 31.5 + (Math.random() - 0.5) * 2,
+            'COPPER': 4.15 + (Math.random() - 0.5) * 0.3
+          };
+          
+          try {
+            const response = await axios.get(`https://api.metals.live/v1/spot/${asset.symbol.toLowerCase()}`, {
+              timeout: 5000
+            });
+            price = response.data.price;
+            source = 'metals.live';
+          } catch (error) {
+            console.log(`⚠️ Commodity API failed for ${asset.symbol}: ${error.message}`);
+            price = fallbackPrices[asset.symbol] || 100;
+            source = 'fallback';
+            console.log(`📊 Using fallback price for ${asset.symbol}: ${price}`);
+          }
+        }
+        
+        if (price && !isNaN(price) && price > 0) {
+          // Save to price history
+          const priceHistory = new PriceHistory({
+            symbol: asset.symbol,
+            price: price,
+            timestamp: new Date(),
+            market: asset.market,
+            source: source
+          });
+          
+          await priceHistory.save();
+          
+          console.log(`✅ ${asset.symbol}: ${price} (${source})`);
+          
+          // Get count of price points for this symbol
+          const count = await PriceHistory.countDocuments({ symbol: asset.symbol });
+          console.log(`📊 ${asset.symbol}: ${count} price points`);
+          
+        } else {
+          console.log(`❌ All attempts failed for ${asset.symbol}: ${price}`);
+        }
+        
+      } catch (error) {
+        console.error(`❌ Error fetching ${asset.symbol}:`, error.message);
+      }
+    }
+    
+    console.log('✅ Price history update completed');
+    
+  } catch (error) {
+    console.error('❌ Error updating price histories:', error.message);
+  }
+};
+
+// Define the signal generation function
+const generateSignals = async () => {
+  try {
+    console.log('🤖 Starting enhanced signal generation...');
+    const priceHistories = await PriceHistory.find({}).sort({ timestamp: -1 });
+    const groupedBySymbol = {};
+    priceHistories.forEach(entry => {
+      if (!groupedBySymbol[entry.symbol]) groupedBySymbol[entry.symbol] = [];
+      groupedBySymbol[entry.symbol].push(entry.price);
+    });
+    let signalsGenerated = 0;
+    const timeframes = [60, 240, 1440]; // 1H, 4H, 1D
+    for (const asset of userConfig.assets) {
+      try {
+        for (const tf of timeframes) {
+          const priceHistory = getTimeframeHistory(groupedBySymbol, asset.symbol, tf);
+          if (priceHistory.length < 26) continue; // For MACD/Bollinger
+          // --- Technical Indicators ---
+          const rsi = RSI.calculate({ values: priceHistory.slice(0, 14).reverse(), period: 14 });
+          const macd = MACD.calculate({
+            values: priceHistory.slice(0, 26).reverse(),
+            fastPeriod: 12,
+            slowPeriod: 26,
+            signalPeriod: 9,
+            SimpleMAOscillator: false,
+            SimpleMASignal: false
+          });
+          const stochastic = Stochastic.calculate({
+            high: priceHistory.slice(0, 14).map(p => p * 1.01),
+            low: priceHistory.slice(0, 14).map(p => p * 0.99),
+            close: priceHistory.slice(0, 14),
+            period: 14,
+            signalPeriod: 3
+          });
+          const bb = BollingerBands.calculate({
+            period: 20,
+            values: priceHistory.slice(0, 20).reverse(),
+            stdDev: 2
+          });
+          const lastRSI = rsi[rsi.length - 1];
+          const lastMACD = macd[macd.length - 1];
+          const lastStoch = stochastic[stochastic.length - 1];
+          const lastBB = bb[bb.length - 1];
+          // --- Sentiment ---
+          const sentiment = await getSentimentScore(asset.symbol);
+          // --- Signal logic ---
+          let signalType = null;
+          let confidence = 50;
+          if (lastRSI < 30 && lastStoch.k < 20) {
+            signalType = 'BUY';
+            confidence = 70;
+          } else if (lastRSI > 70 && lastStoch.k > 80) {
+            signalType = 'SELL';
+            confidence = 70;
+          }
+          if (lastMACD && lastMACD.MACD > lastMACD.signal) {
+            if (signalType === 'BUY') confidence += 10;
+            else signalType = 'BUY';
+          } else if (lastMACD && lastMACD.MACD < lastMACD.signal) {
+            if (signalType === 'SELL') confidence += 10;
+            else signalType = 'SELL';
+          }
+          // Bollinger Bands
+          const currentPrice = priceHistory[0];
+          if (lastBB && currentPrice < lastBB.lower) {
+            signalType = 'BUY';
+            confidence += 5;
+          } else if (lastBB && currentPrice > lastBB.upper) {
+            signalType = 'SELL';
+            confidence += 5;
+          }
+          // Sentiment
+          if (sentiment > 0.5) {
+            if (signalType === 'BUY') confidence += 5;
+          } else if (sentiment < -0.5) {
+            if (signalType === 'SELL') confidence += 5;
+          }
+          // Price momentum
+          const previousPrice = priceHistory[1];
+          const priceChange = ((currentPrice - previousPrice) / previousPrice) * 100;
+          if (priceChange > 1) {
+            signalType = 'BUY';
+            confidence += 5;
+          } else if (priceChange < -1) {
+            signalType = 'SELL';
+            confidence += 5;
+          }
+          // Risk management
+          const positionSize = calculatePositionSize(10000, 1, signalType === 'BUY' ? currentPrice * 0.98 : currentPrice * 1.02, currentPrice);
+          // Only generate strong signals
+          if (signalType && confidence >= userConfig.minConfidence) {
+            const signal = new Signal({
+              symbol: asset.symbol,
+              type: signalType,
+              confidence: Math.min(99, Math.round(confidence)),
+              entryPrice: currentPrice,
+              targetPrice: signalType === 'BUY' ? currentPrice * 1.02 : currentPrice * 0.98,
+              stopLoss: signalType === 'BUY' ? currentPrice * 0.98 : currentPrice * 1.02,
+              market: asset.market,
+              timeframe: tf === 60 ? '1H' : tf === 240 ? '4H' : '1D',
+              description: `${signalType} signal (RSI: ${lastRSI?.toFixed(2)}, MACD: ${lastMACD?.MACD?.toFixed(2)}, Stoch: ${lastStoch?.k?.toFixed(2)}, BB: ${lastBB ? `${lastBB.lower.toFixed(2)}-${lastBB.upper.toFixed(2)}` : 'n/a'}, Sentiment: ${sentiment.toFixed(2)})`,
+              positionSize,
+              timestamp: new Date()
+            });
+            await signal.save();
+            signalsGenerated++;
+            await sendSignalNotification(signal); // Notification
+            console.log(`✅ ${asset.symbol} [${signal.timeframe}]: ${signalType} signal generated (${confidence}% confidence)`);
+          } else {
+            console.log(`⏭️ ${asset.symbol} [${tf}]: No strong signal generated (${signalType}, ${confidence}% confidence)`);
+          }
+        }
+      } catch (error) {
+        console.error(`❌ Error generating signal for ${asset.symbol}:`, error.message);
+      }
+    }
+    // --- Recommendations for further improvements ---
+    // 1. Add more technical indicators (Stochastic, Bollinger Bands, etc.)
+    // 2. Use ML models for advanced signal generation
+    // 3. Incorporate news/sentiment analysis for stocks/crypto
+    // 4. Add multi-timeframe analysis (1H, 4H, 1D)
+    // 5. Add risk management and position sizing logic
+    // 6. Store and analyze past signal performance for feedback
+    // 7. Allow user-configurable asset lists and signal thresholds
+    // 8. Add more robust error handling and fallback APIs
+    // 9. Support for more markets/assets dynamically
+    // 10. Add notification/webhook integration for signals
+    console.log(`🎯 Signal generation completed: ${signalsGenerated} signals generated`);
+  } catch (error) {
+    console.error('❌ Error in signal generation:', error.message);
+  }
+};
+
+// Now set up the intervals AFTER the functions are defined
+console.log('⏰ Setting up intervals...');
+
+// Start price updates every 30 seconds
+priceUpdateInterval = setInterval(updatePrices, 30 * 1000);
+
+// Start signal generation every 2 minutes  
+signalGenerationInterval = setInterval(generateSignals, 2 * 60 * 1000);
+
+// Initial calls
+console.log('🚀 Starting initial updates...');
+updatePrices();
+setTimeout(generateSignals, 5000); // Wait 5 seconds before first signal generation
+
+// Graceful shutdown (place this at the very end of your file)
+const gracefulShutdown = (signal) => {
+  console.log(`📴 Received ${signal}. Shutting down gracefully...`);
+  
+  // Clear intervals if they exist
+  if (priceUpdateInterval) {
+    clearInterval(priceUpdateInterval);
+    console.log('✅ Price update interval cleared');
+  }
+  if (signalGenerationInterval) {
+    clearInterval(signalGenerationInterval);
+    console.log('✅ Signal generation interval cleared');
+  }
+  
+  // Close database connection
+  if (mongoose.connection.readyState === 1) {
+    mongoose.connection.close(() => {
+      console.log('📴 Database connection closed.');
+      process.exit(0);
+    });
+  } else {
+    process.exit(0);
+  }
+};
+
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
 
 // --- Market Data Endpoint & Update ---
 app.get('/api/market/data', async (req, res) => {
@@ -886,44 +1231,17 @@ async function generateSignals() {
       } else {
         console.log(`⚪ HOLD signal for ${asset.symbol} (${asset.market}) - confidence: ${confidence}%`);
       }
-    } catch (error) {
-      console.error(`❌ Error generating signal for ${asset.symbol}:`, error.message);
     }
   }
   
-  console.log('✅ Signal generation completed');
+  console.error(`❌ All attempts failed for ${symbol}:`, lastError?.message);
+  return null;
 }
 
-// --- Enhanced price history updater with better error handling ---
-const assets = [
-  { symbol: 'BTCUSDT', market: 'crypto' },
-  { symbol: 'ETHUSDT', market: 'crypto' },
-  { symbol: 'EURUSD', market: 'forex' },
-  { symbol: 'GBPUSD', market: 'forex' },
-  { symbol: 'AAPL', market: 'stocks' },
-  { symbol: 'TSLA', market: 'stocks' },
-  { symbol: 'GOLD', market: 'commodities' },
-  { symbol: 'OIL', market: 'commodities' },
-];
 
-// Declare interval variables at the top to avoid temporal dead zone issues
-let priceHistoryInterval;
-let signalGenerationInterval;
-let demoMonitorInterval;
-let marketUpdateInterval;
-let portfolioUpdateInterval;
-
-// Track system state
-let systemState = {
-  priceCollectionStarted: false,
-  signalGenerationStarted: false,
-  initialPriceCollectionComplete: false,
-  startTime: Date.now()
-};
-
-// --- Enhanced function to start all intervals with better timing ---
-function startIntervals() {
-  console.log('🔄 Initializing enhanced trading system...');
+// Enhanced price history updater with better error handling
+const priceHistoryInterval = setInterval(async () => {
+  console.log('🔄 Updating price histories...');
   
   // Debug: Check all functions before starting intervals
   console.log('🔍 Function validation:');
@@ -1297,84 +1615,70 @@ const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   try {
-    server.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`🌐 Health check: http://localhost:${PORT}/api/health`);
-      console.log(`📊 Market data: http://localhost:${PORT}/api/market/data`);
-      console.log(`📈 Signals: http://localhost:${PORT}/api/signals`);
-      console.log(`💼 Portfolio: http://localhost:${PORT}/api/portfolio`);
-      console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`📅 Started at: ${new Date().toISOString()}`);
-      
-      // API Key status
-      console.log('\n🔑 API Key Status:');
-      console.log(`Alpha Vantage: ${ALPHA_VANTAGE_KEY ? '✅ Available' : '❌ Missing'}`);
-      console.log(`Twelve Data: ${TWELVE_DATA_KEY ? '✅ Available' : '❌ Missing'}`);
-      console.log(`News API: ${process.env.NEWS_API_KEY ? '✅ Available' : '❌ Missing'}`);
-      
-      // Service status
-      console.log('\n🔧 Service Status:');
-      console.log(`MongoDB: ${mongoose.connection.readyState === 1 ? '✅ Connected' : '❌ Disconnected'}`);
-      console.log(`WebSocket: ✅ Running`);
-      console.log(`Price Updates: ✅ Every 5 seconds`);
-      console.log(`Market Updates: ✅ Every 5 minutes`);
-      console.log(`Portfolio Updates: ✅ Every 5 minutes`);
-      console.log(`Signal Generation: ✅ Every 15 minutes`);
-      console.log(`Demo Position Monitor: ✅ Every minute`);
-      
-      // Start intervals after server is fully initialized
-      setTimeout(() => {
-        startIntervals();
-      }, 3000); // Wait 3 seconds for everything to be fully initialized
-    });
-  } catch (error) {
-    console.error('❌ Failed to start server:', error.message);
+    const currentPrice = analysis.analysis.currentPrice;
+    const volatility = analysis.analysis.volatility;
     
-    // Provide helpful troubleshooting information
-    if (error.message.includes('EADDRINUSE')) {
-      console.log('\n🔧 Port already in use:');
-      console.log(`Kill the process using port ${PORT} or use a different port`);
-      console.log(`Try: lsof -ti:${PORT} | xargs kill -9`);
+    // Calculate dynamic stop loss and take profit based on volatility and market
+    let stopLossPercent, takeProfitPercent;
+    
+    switch (asset.market) {
+      case 'crypto':
+        stopLossPercent = Math.max(2, volatility * 100 * 0.8);
+        takeProfitPercent = Math.max(4, volatility * 100 * 1.5);
+        break;
+      case 'forex':
+        stopLossPercent = Math.max(0.5, volatility * 100 * 0.6);
+        takeProfitPercent = Math.max(1, volatility * 100 * 1.2);
+        break;
+      case 'stocks':
+        stopLossPercent = Math.max(1.5, volatility * 100 * 0.7);
+        takeProfitPercent = Math.max(3, volatility * 100 * 1.3);
+        break;
+      case 'commodities':
+        stopLossPercent = Math.max(1, volatility * 100 * 0.75);
+        takeProfitPercent = Math.max(2, volatility * 100 * 1.4);
+        break;
+      default:
+        stopLossPercent = 2;
+        takeProfitPercent = 4;
     }
     
-    process.exit(1);
+    // Calculate prices
+    let entryPrice, targetPrice, stopLoss;
+    
+    if (analysis.signalType === 'BUY') {
+      entryPrice = currentPrice;
+      targetPrice = currentPrice * (1 + takeProfitPercent / 100);
+      stopLoss = currentPrice * (1 - stopLossPercent / 100);
+    } else {
+      entryPrice = currentPrice;
+      targetPrice = currentPrice * (1 - takeProfitPercent / 100);
+      stopLoss = currentPrice * (1 + stopLossPercent / 100);
+    }
+    
+    // Generate timeframe based on confidence and market
+    const timeframes = ['15M', '1H', '4H', '1D'];
+    let timeframe;
+    if (analysis.confidence >= 85) timeframe = '1D';
+    else if (analysis.confidence >= 75) timeframe = '4H';
+    else if (analysis.confidence >= 65) timeframe = '1H';
+    else timeframe = '15M';
+    
+    // Generate description
+    const description = generateSignalDescription(asset, analysis);
+    
+    const signalData = {
+      symbol: asset.symbol,
+      market: asset.market,
+      type: analysis.signalType,
+      confidence: analysis.confidence,
+      entryPrice:currentPrice,
+      targetPrice,
+      stopLoss,
+      timeframe,
+    }
+  } catch (error) {
+    console.error('Error generating enhanced signal:', error);
+    return null;
   }
-};
-
-// Start the server
-console.log('🚀 Starting Apterra Trading App Backend...');
-console.log('📅 Startup Time:', new Date().toISOString());
-console.log('🌍 Current IP: 197.248.68.197 (Add to MongoDB whitelist if needed)');
-
-startServer();
-
-// API key warnings
-if (!ALPHA_VANTAGE_KEY) console.warn('⚠️ Alpha Vantage API key missing - forex/stocks data limited');
-if (!TWELVE_DATA_KEY) console.warn('⚠️ Twelve Data API key missing - commodities data limited');
-if (!process.env.NEWS_API_KEY) console.warn('⚠️ News API key missing - sentiment analysis disabled');
-
-// Enhanced global error handling
-process.on('unhandledRejection', (reason, promise) => {
-  // Don't log database connection errors repeatedly
-  if (reason && reason.message && reason.message.includes('bufferCommands')) {
-    return; // Silently ignore these specific errors
-  }
-  
-  console.error('❌ Unhandled Promise Rejection:', reason.message || reason);
-  if (process.env.NODE_ENV === 'development') {
-    console.error('Stack:', reason.stack || 'No stack trace available');
-  }
-  // Don't exit the process - continue running
-});
-
-process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught Exception:', error.message);
-  if (process.env.NODE_ENV === 'development') {
-    console.error('Stack:', error.stack);
-  }
-  // For uncaught exceptions, we should exit gracefully
-  gracefulShutdown('UNCAUGHT_EXCEPTION');
-});
-
-// Export app for testing
-module.exports = app;
+}
