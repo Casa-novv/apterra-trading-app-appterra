@@ -625,43 +625,12 @@ const assets = [
   { symbol: 'OIL', market: 'commodities' },
 ];
 
-const priceHistoryInterval = setInterval(async () => {
-  console.log('🔄 Starting price history update...');
-  
-  for (let i = 0; i < assets.length; i++) {
-    const asset = assets[i];
-    
-    try {
-      // Add delay between requests to respect rate limits
-      if (i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between assets
-      }
-      
-      const price = await fetchLatestPriceWithRetry(asset.symbol, asset.market);
-      if (!price) {
-        console.log(`⚠️ Skipping ${asset.symbol} - no price data available`);
-        continue;
-      }
-      
-      if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
-      priceHistories[asset.symbol].push(price);
-      
-      // Keep only the last 30 prices
-      if (priceHistories[asset.symbol].length > 30) {
-        priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-30);
-      }
-      
-      console.log(`✅ Updated ${asset.symbol}: $${price} (${priceHistories[asset.symbol].length} points)`);
-    } catch (error) {
-      console.error(`Error updating price history for ${asset.symbol}:`, error.message);
-    }
-  }
-  
-  console.log('✅ Price history update completed');
-}, 2 * 60 * 1000); // every 2 minutes instead of 30 seconds
+// Declare interval variables at the top to avoid temporal dead zone issues
+let priceHistoryInterval;
+let signalGenerationInterval;
 
-// --- Enhanced signal generation with proper data validation ---
-const signalGenerationInterval = setInterval(async () => {
+// --- Enhanced signal generation function ---
+async function generateSignals() {
   if (mongoose.connection.readyState !== 1) {
     console.log('MongoDB not connected - skipping signal generation');
     return;
@@ -840,7 +809,46 @@ const signalGenerationInterval = setInterval(async () => {
   }
   
   console.log('🎯 Signal generation completed');
-}, 15 * 60 * 1000); // every 15 minutes
+}
+
+// --- Start price history updater ---
+priceHistoryInterval = setInterval(async () => {
+  console.log('🔄 Starting price history update...');
+  
+  for (let i = 0; i < assets.length; i++) {
+    const asset = assets[i];
+    
+    try {
+      // Add delay between requests to respect rate limits
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between assets
+      }
+      
+      const price = await fetchLatestPriceWithRetry(asset.symbol, asset.market);
+      if (!price) {
+        console.log(`⚠️ Skipping ${asset.symbol} - no price data available`);
+        continue;
+      }
+      
+      if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
+      priceHistories[asset.symbol].push(price);
+      
+      // Keep only the last 30 prices
+      if (priceHistories[asset.symbol].length > 30) {
+        priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-30);
+      }
+      
+      console.log(`✅ Updated ${asset.symbol}: $${price} (${priceHistories[asset.symbol].length} points)`);
+    } catch (error) {
+      console.error(`Error updating price history for ${asset.symbol}:`, error.message);
+    }
+  }
+  
+  console.log('✅ Price history update completed');
+}, 2 * 60 * 1000); // every 2 minutes
+
+// --- Start signal generation ---
+signalGenerationInterval = setInterval(generateSignals, 15 * 60 * 1000); // every 15 minutes
 
 // --- Signals API Endpoint ---
 app.get('/api/signals', async (req, res) => {
@@ -988,11 +996,10 @@ const gracefulShutdown = async (signal) => {
   console.log(`\n📴 Received ${signal}. Shutting down gracefully...`);
   
   // Clear all intervals
-  clearInterval(priceUpdateInterval);
-  clearInterval(marketUpdateInterval);
-  clearInterval(portfolioUpdateInterval);
   clearInterval(priceHistoryInterval);
   clearInterval(signalGenerationInterval);
+  clearInterval(marketUpdateInterval);
+  clearInterval(portfolioUpdateInterval);
   clearInterval(demoMonitorInterval);
   
   // Close WebSocket server
