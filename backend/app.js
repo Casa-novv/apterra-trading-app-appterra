@@ -126,7 +126,7 @@ app.get('/api/health', (req, res) => {
 });
 // At the very top of your file (after imports but before any other code)
 let priceUpdateInterval;
-let signalGenerationInterval;
+
 // Import Mongoose models with error handling
 let Signal, Market, Portfolio;
 try {
@@ -1035,22 +1035,6 @@ async function fetchLatestPriceEnhanced(symbol, market) {
   return null;
 }
 
-// Helper function for CoinGecko IDs
-function getCoinGeckoId(binanceSymbol) {
-  const mapping = {
-    'BTCUSDT': 'bitcoin',
-    'ETHUSDT': 'ethereum',
-    'BNBUSDT': 'binancecoin',
-    'ADAUSDT': 'cardano',
-    'SOLUSDT': 'solana',
-    'XRPUSDT': 'ripple',
-    'DOTUSDT': 'polkadot',
-    'AVAXUSDT': 'avalanche-2',
-    'MATICUSDT': 'matic-network',
-    'LINKUSDT': 'chainlink',
-  };
-  return mapping[binanceSymbol] || null;
-}
 
 // Enhanced price history updater with better error handling
 const priceHistoryInterval = setInterval(async () => {
@@ -1381,5 +1365,8 @@ async function generateEnhancedSignal(asset, analysis) {
       stopLoss,
       timeframe,
     }
-  };
+  } catch (error) {
+    console.error('Error generating enhanced signal:', error);
+    return null;
+  }
 }
