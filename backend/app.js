@@ -7,10 +7,11 @@ const WebSocket = require('ws');
 const fetch = require('node-fetch');
 const axios = require('axios');
 // Instead of ta, we use technicalindicators:
-const { RSI, MACD } = require('technicalindicators');
+const { RSI, MACD, Stochastic, BollingerBands } = require('technicalindicators');
 const jwt = require('jsonwebtoken');
 const Sentiment = require('sentiment');
 const tf = require('@tensorflow/tfjs');
+const nodemailer = require('nodemailer'); // For notifications
 
 const app = express();
 
@@ -494,97 +495,113 @@ const updatePriceHistories = async () => {
 const generateSignals = async () => {
   try {
     console.log('🤖 Starting enhanced signal generation...');
-    
-    // Get all price histories
     const priceHistories = await PriceHistory.find({}).sort({ timestamp: -1 });
     const groupedBySymbol = {};
-    
     priceHistories.forEach(entry => {
-      if (!groupedBySymbol[entry.symbol]) {
-        groupedBySymbol[entry.symbol] = [];
-      }
+      if (!groupedBySymbol[entry.symbol]) groupedBySymbol[entry.symbol] = [];
       groupedBySymbol[entry.symbol].push(entry.price);
     });
-    
-    console.log('📊 Current price histories:');
-    Object.keys(groupedBySymbol).forEach(symbol => {
-      console.log(`  ${symbol}: ${groupedBySymbol[symbol].length} data points`);
-    });
-    
-    // Enhanced signal generation logic for robustness and more signals
-    // Recommendations for further improvements are added as comments
     let signalsGenerated = 0;
-    const MIN_DATA_POINTS = 14; // For RSI/MACD, need at least 14
-
-    for (const asset of assets) {
+    const timeframes = [60, 240, 1440]; // 1H, 4H, 1D
+    for (const asset of userConfig.assets) {
       try {
-        const priceHistory = groupedBySymbol[asset.symbol] || [];
-        if (priceHistory.length < MIN_DATA_POINTS) {
-          console.log(`⏭️ ${asset.symbol}: Insufficient data (${priceHistory.length}/${MIN_DATA_POINTS})`);
-          continue;
-        }
-        console.log(`🔍 Analyzing ${asset.symbol} (${asset.market})...`);
-        // --- Technical Indicators ---
-        const rsi = RSI.calculate({ values: priceHistory.slice(0, 14).reverse(), period: 14 });
-        const macd = MACD.calculate({
-          values: priceHistory.slice(0, 26).reverse(),
-          fastPeriod: 12,
-          slowPeriod: 26,
-          signalPeriod: 9,
-          SimpleMAOscillator: false,
-          SimpleMASignal: false
-        });
-        const lastRSI = rsi[rsi.length - 1];
-        const lastMACD = macd[macd.length - 1];
-        let signalType = null;
-        let confidence = 50;
-        // --- Signal logic ---
-        // RSI-based
-        if (lastRSI < 30) {
-          signalType = 'BUY';
-          confidence = 70;
-        } else if (lastRSI > 70) {
-          signalType = 'SELL';
-          confidence = 70;
-        }
-        // MACD-based
-        if (lastMACD && lastMACD.MACD > lastMACD.signal) {
-          if (signalType === 'BUY') confidence += 10;
-          else signalType = 'BUY';
-        } else if (lastMACD && lastMACD.MACD < lastMACD.signal) {
-          if (signalType === 'SELL') confidence += 10;
-          else signalType = 'SELL';
-        }
-        // Price momentum
-        const currentPrice = priceHistory[0];
-        const previousPrice = priceHistory[1];
-        const priceChange = ((currentPrice - previousPrice) / previousPrice) * 100;
-        if (priceChange > 1) {
-          signalType = 'BUY';
-          confidence += 5;
-        } else if (priceChange < -1) {
-          signalType = 'SELL';
-          confidence += 5;
-        }
-        // Only generate strong signals
-        if (signalType && confidence >= 60) {
-          const signal = new Signal({
-            symbol: asset.symbol,
-            type: signalType,
-            confidence: Math.min(99, Math.round(confidence)),
-            entryPrice: currentPrice,
-            targetPrice: signalType === 'BUY' ? currentPrice * 1.02 : currentPrice * 0.98,
-            stopLoss: signalType === 'BUY' ? currentPrice * 0.98 : currentPrice * 1.02,
-            market: asset.market,
-            timeframe: '1H',
-            description: `${signalType} signal (RSI: ${lastRSI?.toFixed(2)}, MACD: ${lastMACD?.MACD?.toFixed(2)})`,
-            timestamp: new Date()
+        for (const tf of timeframes) {
+          const priceHistory = getTimeframeHistory(groupedBySymbol, asset.symbol, tf);
+          if (priceHistory.length < 26) continue; // For MACD/Bollinger
+          // --- Technical Indicators ---
+          const rsi = RSI.calculate({ values: priceHistory.slice(0, 14).reverse(), period: 14 });
+          const macd = MACD.calculate({
+            values: priceHistory.slice(0, 26).reverse(),
+            fastPeriod: 12,
+            slowPeriod: 26,
+            signalPeriod: 9,
+            SimpleMAOscillator: false,
+            SimpleMASignal: false
           });
-          await signal.save();
-          signalsGenerated++;
-          console.log(`✅ ${asset.symbol}: ${signalType} signal generated (${confidence}% confidence)`);
-        } else {
-          console.log(`⏭️ ${asset.symbol}: No strong signal generated (${signalType}, ${confidence}% confidence)`);
+          const stochastic = Stochastic.calculate({
+            high: priceHistory.slice(0, 14).map(p => p * 1.01),
+            low: priceHistory.slice(0, 14).map(p => p * 0.99),
+            close: priceHistory.slice(0, 14),
+            period: 14,
+            signalPeriod: 3
+          });
+          const bb = BollingerBands.calculate({
+            period: 20,
+            values: priceHistory.slice(0, 20).reverse(),
+            stdDev: 2
+          });
+          const lastRSI = rsi[rsi.length - 1];
+          const lastMACD = macd[macd.length - 1];
+          const lastStoch = stochastic[stochastic.length - 1];
+          const lastBB = bb[bb.length - 1];
+          // --- Sentiment ---
+          const sentiment = await getSentimentScore(asset.symbol);
+          // --- Signal logic ---
+          let signalType = null;
+          let confidence = 50;
+          if (lastRSI < 30 && lastStoch.k < 20) {
+            signalType = 'BUY';
+            confidence = 70;
+          } else if (lastRSI > 70 && lastStoch.k > 80) {
+            signalType = 'SELL';
+            confidence = 70;
+          }
+          if (lastMACD && lastMACD.MACD > lastMACD.signal) {
+            if (signalType === 'BUY') confidence += 10;
+            else signalType = 'BUY';
+          } else if (lastMACD && lastMACD.MACD < lastMACD.signal) {
+            if (signalType === 'SELL') confidence += 10;
+            else signalType = 'SELL';
+          }
+          // Bollinger Bands
+          const currentPrice = priceHistory[0];
+          if (lastBB && currentPrice < lastBB.lower) {
+            signalType = 'BUY';
+            confidence += 5;
+          } else if (lastBB && currentPrice > lastBB.upper) {
+            signalType = 'SELL';
+            confidence += 5;
+          }
+          // Sentiment
+          if (sentiment > 0.5) {
+            if (signalType === 'BUY') confidence += 5;
+          } else if (sentiment < -0.5) {
+            if (signalType === 'SELL') confidence += 5;
+          }
+          // Price momentum
+          const previousPrice = priceHistory[1];
+          const priceChange = ((currentPrice - previousPrice) / previousPrice) * 100;
+          if (priceChange > 1) {
+            signalType = 'BUY';
+            confidence += 5;
+          } else if (priceChange < -1) {
+            signalType = 'SELL';
+            confidence += 5;
+          }
+          // Risk management
+          const positionSize = calculatePositionSize(10000, 1, signalType === 'BUY' ? currentPrice * 0.98 : currentPrice * 1.02, currentPrice);
+          // Only generate strong signals
+          if (signalType && confidence >= userConfig.minConfidence) {
+            const signal = new Signal({
+              symbol: asset.symbol,
+              type: signalType,
+              confidence: Math.min(99, Math.round(confidence)),
+              entryPrice: currentPrice,
+              targetPrice: signalType === 'BUY' ? currentPrice * 1.02 : currentPrice * 0.98,
+              stopLoss: signalType === 'BUY' ? currentPrice * 0.98 : currentPrice * 1.02,
+              market: asset.market,
+              timeframe: tf === 60 ? '1H' : tf === 240 ? '4H' : '1D',
+              description: `${signalType} signal (RSI: ${lastRSI?.toFixed(2)}, MACD: ${lastMACD?.MACD?.toFixed(2)}, Stoch: ${lastStoch?.k?.toFixed(2)}, BB: ${lastBB ? `${lastBB.lower.toFixed(2)}-${lastBB.upper.toFixed(2)}` : 'n/a'}, Sentiment: ${sentiment.toFixed(2)})`,
+              positionSize,
+              timestamp: new Date()
+            });
+            await signal.save();
+            signalsGenerated++;
+            await sendSignalNotification(signal); // Notification
+            console.log(`✅ ${asset.symbol} [${signal.timeframe}]: ${signalType} signal generated (${confidence}% confidence)`);
+          } else {
+            console.log(`⏭️ ${asset.symbol} [${tf}]: No strong signal generated (${signalType}, ${confidence}% confidence)`);
+          }
         }
       } catch (error) {
         console.error(`❌ Error generating signal for ${asset.symbol}:`, error.message);
@@ -602,7 +619,6 @@ const generateSignals = async () => {
     // 9. Support for more markets/assets dynamically
     // 10. Add notification/webhook integration for signals
     console.log(`🎯 Signal generation completed: ${signalsGenerated} signals generated`);
-    
   } catch (error) {
     console.error('❌ Error in signal generation:', error.message);
   }
