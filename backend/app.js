@@ -1051,7 +1051,6 @@ async function getPriceHistory(symbol, length = 50) {
 
 // --- Demo Position Monitoring Job ---
 let monitorDemoPositions;
-let demoMonitorInterval;
 try {
   const demoMonitor = require('./jobs/demoPositionMonitor');
   monitorDemoPositions = demoMonitor.monitorDemoPositions;
