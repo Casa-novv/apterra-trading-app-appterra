@@ -1,44 +1,46 @@
 const mongoose = require('mongoose');
 
-const marketDataSchema = new mongoose.Schema({
+const MarketDataSchema = new mongoose.Schema({
   symbol: {
     type: String,
-    required: true,
-    index: true
-  },
-  market: {
-    type: String,
-    required: true,
-    enum: ['crypto', 'forex', 'stocks', 'commodities']
+    required: true
   },
   price: {
     type: Number,
     required: true
   },
-  volume: {
-    type: Number,
-    default: 0
-  },
   change24h: {
     type: Number,
     default: 0
   },
-  timestamp: {
-    type: Date,
-    default: Date.now,
-    index: true
+  changePercent24h: {
+    type: Number,
+    default: 0
+  },
+  volume24h: {
+    type: Number,
+    default: 0
+  },
+  marketCap: {
+    type: Number,
+    default: 0
   },
   source: {
     type: String,
-    required: true
+    default: 'unknown'
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now
   }
+}, {
+  timestamps: true
 });
 
-// Create compound index for efficient queries
-marketDataSchema.index({ symbol: 1, timestamp: -1 });
-marketDataSchema.index({ market: 1, timestamp: -1 });
+// Create compound index on symbol and timestamp for efficient queries
+MarketDataSchema.index({ symbol: 1, timestamp: -1 });
 
-// TTL index to automatically delete old data after 7 days
-marketDataSchema.index({ timestamp: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60 });
+// TTL index to automatically delete old data after 30 days (separate field)
+MarketDataSchema.index({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
 
-module.exports = mongoose.model('MarketData', marketDataSchema);
+module.exports = mongoose.model('MarketData', MarketDataSchema);
