@@ -1,5 +1,4 @@
 require('dotenv').config();
-let priceUpdateInterval;
 let Signal, Market, Portfolio;
 const express = require('express');
 const http = require('http');
