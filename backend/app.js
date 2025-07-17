@@ -1352,7 +1352,7 @@ const priceHistoryInterval = setInterval(async () => {
     console.error('❌ Error starting intervals:', error.message);
     console.error('Stack:', error.stack);
   }
-}
+});
 
 // --- Separate function to start signal generation ---
 function startSignalGeneration() {
