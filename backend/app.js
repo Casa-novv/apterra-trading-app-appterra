@@ -613,22 +613,6 @@ async function fetchLatestPriceWithRetry(symbol, market, maxRetries = 3) {
   return null;
 }
 
-// --- Enhanced price history updater with rate limiting ---
-const assets = [
-  { symbol: 'BTCUSDT', market: 'crypto' },
-  { symbol: 'ETHUSDT', market: 'crypto' },
-  { symbol: 'EURUSD', market: 'forex' },
-  { symbol: 'GBPUSD', market: 'forex' },
-  { symbol: 'AAPL', market: 'stocks' },
-  { symbol: 'TSLA', market: 'stocks' },
-  { symbol: 'GOLD', market: 'commodities' },
-  { symbol: 'OIL', market: 'commodities' },
-];
-
-// Declare interval variables at the top to avoid temporal dead zone issues
-let priceHistoryInterval;
-let signalGenerationInterval;
-
 // --- Enhanced signal generation function ---
 async function generateSignals() {
   if (mongoose.connection.readyState !== 1) {
@@ -675,6 +659,7 @@ async function generateSignals() {
     return;
   }
 
+  // Process each asset type with specific logic
   for (const asset of assets) {
     try {
       const priceHistory = priceHistories[asset.symbol] || [];
@@ -685,11 +670,7 @@ async function generateSignals() {
         continue;
       }
       
-      // Check if price data is recent (within last 5 minutes)
-      const latestPriceTime = Date.now();
-      const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
-      
-      console.log(`📊 Generating signal for ${asset.symbol} with ${priceHistory.length} data points`);
+      console.log(`📊 Generating signal for ${asset.symbol} (${asset.market}) with ${priceHistory.length} data points`);
       
       // --- Technical Indicators ---
       const rsiValues = RSI.calculate({ values: priceHistory, period: 14 });
@@ -709,10 +690,30 @@ async function generateSignals() {
       const emaValues = require('technicalindicators').EMA.calculate({ values: priceHistory, period: 10 });
       const currentEMA = emaValues.length ? emaValues[emaValues.length - 1] : priceHistory[priceHistory.length - 1];
       
-      // --- Bypass AI for now ---
-      const predictedTrend = 0;
+      // --- Market-specific analysis ---
+      let marketMultiplier = 1;
+      let volatilityFactor = 1;
       
-      // --- News sentiment (optional, can skip for speed) ---
+      switch (asset.market) {
+        case 'crypto':
+          marketMultiplier = 1.2; // Crypto is more volatile
+          volatilityFactor = 1.5;
+          break;
+        case 'forex':
+          marketMultiplier = 0.8; // Forex is more stable
+          volatilityFactor = 0.7;
+          break;
+        case 'stocks':
+          marketMultiplier = 1.0; // Standard multiplier
+          volatilityFactor = 1.0;
+          break;
+        case 'commodities':
+          marketMultiplier = 1.1; // Commodities have unique patterns
+          volatilityFactor = 1.2;
+          break;
+      }
+      
+      // --- News sentiment (optional) ---
       let newsSentiment = 0;
       try {
         newsSentiment = await analyzeNewsSentiment(asset.symbol);
@@ -720,43 +721,91 @@ async function generateSignals() {
         newsSentiment = 0;
       }
       
-      // --- Enhanced signal logic with better validation ---
+      // --- Enhanced signal logic with market-specific thresholds ---
       let signalType = 'HOLD';
       let signalStrength = 0;
       
-      // RSI signals
-      if (currentRSI > 70) signalStrength -= 1; // Overbought
-      if (currentRSI < 30) signalStrength += 1; // Oversold
+      // RSI signals with market-specific thresholds
+      const rsiOverbought = asset.market === 'crypto' ? 75 : 70;
+      const rsiOversold = asset.market === 'crypto' ? 25 : 30;
+      
+      if (currentRSI > rsiOverbought) signalStrength -= 1.5; // Overbought
+      if (currentRSI < rsiOversold) signalStrength += 1.5; // Oversold
       
       // MACD signals
-      if (currentMACD > 0) signalStrength += 0.5;
-      if (currentMACD < 0) signalStrength -= 0.5;
+      if (currentMACD > 0.001) signalStrength += 1.0;
+      if (currentMACD < -0.001) signalStrength -= 1.0;
       
       // Moving average signals
-      if (currentEMA > currentSMA) signalStrength += 0.5;
-      if (currentEMA < currentSMA) signalStrength -= 0.5;
+      const maCrossover = (currentEMA - currentSMA) / currentSMA * 100;
+      if (maCrossover > 0.5) signalStrength += 0.8;
+      if (maCrossover < -0.5) signalStrength -= 0.8;
       
-      // Determine signal type based on strength
-      if (signalStrength >= 1.5) {
+      // News sentiment factor
+      signalStrength += newsSentiment * 0.3;
+      
+      // Apply market multiplier
+      signalStrength *= marketMultiplier;
+      
+      // Determine signal type based on strength and market
+      const buyThreshold = asset.market === 'crypto' ? 2.0 : 1.5;
+      const sellThreshold = asset.market === 'crypto' ? -2.0 : -1.5;
+      
+      if (signalStrength >= buyThreshold) {
         signalType = 'BUY';
-      } else if (signalStrength <= -1.5) {
+      } else if (signalStrength <= sellThreshold) {
         signalType = 'SELL';
       }
       
-      // Enhanced confidence calculation
-      const confidence = Math.min(100, Math.max(0, Math.round(
-        (Math.abs(currentRSI - 50) * 0.8) +
-        (Math.abs(currentMACD) * 20) +
-        (Math.abs(currentEMA - currentSMA) / currentSMA * 100 * 0.5) +
-        (Math.abs(newsSentiment) * 10)
-      )));
+      // --- Enhanced confidence calculation ---
+      const rsiConfidence = Math.min(30, Math.abs(currentRSI - 50) * 0.6);
+      const macdConfidence = Math.min(25, Math.abs(currentMACD) * 500);
+      const maConfidence = Math.min(20, Math.abs(maCrossover) * 4);
+      const sentimentConfidence = Math.min(15, Math.abs(newsSentiment) * 30);
+      const strengthConfidence = Math.min(10, Math.abs(signalStrength) * 5);
+      
+      const confidence = Math.round(
+        rsiConfidence + 
+        macdConfidence + 
+        maConfidence + 
+        sentimentConfidence + 
+        strengthConfidence
+      );
       
       const livePrice = priceHistory[priceHistory.length - 1];
-      const stopLoss = livePrice * (signalType === 'BUY' ? 0.98 : 1.02);
-      const targetPrice = livePrice * (signalType === 'BUY' ? 1.05 : 0.95);
       
-      // Only generate signals with reasonable confidence
-      if (signalType !== 'HOLD' && confidence >= 60) {
+      // Market-specific stop loss and target calculation
+      let stopLossPercent, targetPercent;
+      
+      switch (asset.market) {
+        case 'crypto':
+          stopLossPercent = signalType === 'BUY' ? 0.95 : 1.05; // 5% stop loss
+          targetPercent = signalType === 'BUY' ? 1.08 : 0.92; // 8% target
+          break;
+        case 'forex':
+          stopLossPercent = signalType === 'BUY' ? 0.995 : 1.005; // 0.5% stop loss
+          targetPercent = signalType === 'BUY' ? 1.015 : 0.985; // 1.5% target
+          break;
+        case 'stocks':
+          stopLossPercent = signalType === 'BUY' ? 0.98 : 1.02; // 2% stop loss
+          targetPercent = signalType === 'BUY' ? 1.05 : 0.95; // 5% target
+          break;
+        case 'commodities':
+          stopLossPercent = signalType === 'BUY' ? 0.97 : 1.03; // 3% stop loss
+          targetPercent = signalType === 'BUY' ? 1.06 : 0.94; // 6% target
+          break;
+        default:
+          stopLossPercent = signalType === 'BUY' ? 0.98 : 1.02;
+          targetPercent = signalType === 'BUY' ? 1.05 : 0.95;
+      }
+      
+      const stopLoss = livePrice * stopLossPercent;
+      const targetPrice = livePrice * targetPercent;
+      
+      // Only generate signals with reasonable confidence (market-specific thresholds)
+      const minConfidence = asset.market === 'crypto' ? 50 : 60;
+      
+      if (signalType !== 'HOLD' && confidence >= minConfidence) {
         const signalData = {
           symbol: asset.symbol,
           type: signalType,
@@ -766,24 +815,35 @@ async function generateSignals() {
           stopLoss,
           timeframe: '15M',
           market: asset.market,
-          description: `${signalType} signal with ${confidence}% confidence`,
-          reasoning: `RSI=${currentRSI.toFixed(2)}, MACD=${currentMACD.toFixed(4)}, EMA=${currentEMA.toFixed(2)}, SMA=${currentSMA.toFixed(2)}, Sentiment=${newsSentiment}`,
+          description: `${signalType} signal for ${asset.market} with ${confidence}% confidence`,
+          reasoning: `RSI=${currentRSI.toFixed(2)}, MACD=${currentMACD.toFixed(4)}, EMA=${currentEMA.toFixed(4)}, SMA=${currentSMA.toFixed(4)}, MA_Cross=${maCrossover.toFixed(2)}%, Sentiment=${newsSentiment.toFixed(2)}, Strength=${signalStrength.toFixed(2)}`,
           technicalIndicators: { 
             rsi: currentRSI, 
             macd: currentMACD, 
             ema: currentEMA, 
             sma: currentSMA, 
             newsSentiment,
-            signalStrength 
+            signalStrength,
+            maCrossover,
+            marketMultiplier,
+            volatilityFactor
           },
           status: 'active',
           createdAt: new Date(),
           expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-          source: 'ai',
-          risk: confidence > 80 ? 'high' : confidence > 60 ? 'medium' : 'low',
+          source: 'enhanced_ai',
+          risk: confidence > 80 ? 'high' : confidence > 65 ? 'medium' : 'low',
           dataQuality: {
             pricePoints: priceHistory.length,
-            dataAge: 'recent'
+            dataAge: 'recent',
+            marketType: asset.market,
+            confidenceBreakdown: {
+              rsi: rsiConfidence,
+              macd: macdConfidence,
+              ma: maConfidence,
+              sentiment: sentimentConfidence,
+              strength: strengthConfidence
+            }
           }
         };
         
@@ -799,9 +859,9 @@ async function generateSignals() {
         const newSignal = await Signal.create(signalData);
         broadcastSignal(newSignal);
         
-        console.log(`🎯 Generated ${signalType} signal for ${asset.symbol} with ${confidence}% confidence`);
+        console.log(`🎯 Generated ${signalType} signal for ${asset.symbol} (${asset.market}) with ${confidence}% confidence`);
       } else {
-        console.log(`⚪ HOLD signal for ${asset.symbol} (confidence: ${confidence}%)`);
+        console.log(`⚪ HOLD signal for ${asset.symbol} (${asset.market}) - confidence: ${confidence}%`);
       }
     } catch (error) {
       console.error(`Error generating signal for ${asset.symbol}:`, error.message);
@@ -810,6 +870,22 @@ async function generateSignals() {
   
   console.log('🎯 Signal generation completed');
 }
+
+// --- Enhanced price history updater with rate limiting ---
+const assets = [
+  { symbol: 'BTCUSDT', market: 'crypto' },
+  { symbol: 'ETHUSDT', market: 'crypto' },
+  { symbol: 'EURUSD', market: 'forex' },
+  { symbol: 'GBPUSD', market: 'forex' },
+  { symbol: 'AAPL', market: 'stocks' },
+  { symbol: 'TSLA', market: 'stocks' },
+  { symbol: 'GOLD', market: 'commodities' },
+  { symbol: 'OIL', market: 'commodities' },
+];
+
+// Declare interval variables at the top to avoid temporal dead zone issues
+let priceHistoryInterval;
+let signalGenerationInterval;
 
 // --- Start price history updater ---
 priceHistoryInterval = setInterval(async () => {
@@ -838,7 +914,7 @@ priceHistoryInterval = setInterval(async () => {
         priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-30);
       }
       
-      console.log(`✅ Updated ${asset.symbol}: $${price} (${priceHistories[asset.symbol].length} points)`);
+      console.log(`✅ Updated ${asset.symbol} (${asset.market}): $${price} (${priceHistories[asset.symbol].length} points)`);
     } catch (error) {
       console.error(`Error updating price history for ${asset.symbol}:`, error.message);
     }
