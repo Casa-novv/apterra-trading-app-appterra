@@ -156,9 +156,6 @@ app.get('/api/health', (req, res) => {
 });
 // At the very top of your file (after imports but before any other code)
 let priceUpdateInterval;
-
-// Import Mongoose models with error handling
-let Signal, Market, Portfolio;
 try {
   Signal = require('./models/Signal');     // AI signals
   Market = require('./models/Market');       // Market data
@@ -666,33 +663,6 @@ console.log('🚀 Starting initial updates...');
 updatePrices();
 setTimeout(generateSignals, 5000); // Wait 5 seconds before first signal generation
 
-// Graceful shutdown (place this at the very end of your file)
-const gracefulShutdown = (signal) => {
-  console.log(`📴 Received ${signal}. Shutting down gracefully...`);
-  
-  // Clear intervals if they exist
-  if (priceUpdateInterval) {
-    clearInterval(priceUpdateInterval);
-    console.log('✅ Price update interval cleared');
-  }
-  if (signalGenerationInterval) {
-    clearInterval(signalGenerationInterval);
-    console.log('✅ Signal generation interval cleared');
-  }
-  
-  // Close database connection
-  if (mongoose.connection.readyState === 1) {
-    mongoose.connection.close(() => {
-      console.log('📴 Database connection closed.');
-      process.exit(0);
-    });
-  } else {
-    process.exit(0);
-  }
-};
-
-process.on('SIGINT', gracefulShutdown);
-process.on('SIGTERM', gracefulShutdown);
 
 // --- Market Data Endpoint & Update ---
 app.get('/api/market/data', async (req, res) => {
@@ -1231,10 +1201,11 @@ async function generateSignals() {
       } else {
         console.log(`⚪ HOLD signal for ${asset.symbol} (${asset.market}) - confidence: ${confidence}%`);
       }
+    } catch (error) {
+      console.error(`❌ Error processing ${asset.symbol}:`, error.message);
     }
   }
   
-  console.error(`❌ All attempts failed for ${symbol}:`, lastError?.message);
   return null;
 }
 
