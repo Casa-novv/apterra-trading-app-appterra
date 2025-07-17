@@ -38,17 +38,23 @@ app.use((req, res, next) => {
   next();
 });
 
-// Enhanced MongoDB connection with better error handling
+// Enhanced MongoDB connection with better error handling and auto-reconnect
 const connectDB = async () => {
   try {
     console.log('🔄 Attempting to connect to MongoDB...');
     
+    // Enhanced connection options for better stability
     const conn = await mongoose.connect(process.env.MONGO_URI, {
-      serverSelectionTimeoutMS: 30000,
-      socketTimeoutMS: 45000,
+      serverSelectionTimeoutMS: 10000, // Reduced timeout
+      socketTimeoutMS: 30000,
       maxPoolSize: 10,
-      minPoolSize: 5,
+      minPoolSize: 2,
       maxIdleTimeMS: 30000,
+      connectTimeoutMS: 10000,
+      heartbeatFrequencyMS: 10000,
+      retryWrites: true,
+      bufferCommands: false, // Disable mongoose buffering
+      bufferMaxEntries: 0,
       // Removed bufferMaxEntries as it's deprecated
     });
 
@@ -589,7 +595,7 @@ async function fetchLatestPrice(symbol, market) {
 }
 
 // --- Enhanced Helper: Fetch latest price with retry and rate limiting ---
-async function fetchLatestPriceWithRetry(symbol, market, maxRetries = 3) {
+async function fetchLatestPriceWithRetry(symbol, market, maxRetries = 2) {
   let retryCount = 0;
   
   while (retryCount < maxRetries) {
@@ -597,85 +603,69 @@ async function fetchLatestPriceWithRetry(symbol, market, maxRetries = 3) {
       // Add delay for rate limiting (stagger requests)
       if (retryCount > 0) {
         const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
-        console.log(`Retrying ${symbol} after ${delay}ms delay...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
       
       const price = await fetchLatestPrice(symbol, market);
-      if (price !== null) {
+      if (price !== null && price > 0) {
         return price;
       }
       
-      console.log(`API returned null for ${symbol}, attempt ${retryCount + 1}`);
+      // Only log on final attempt to reduce spam
+      if (retryCount === maxRetries - 1) {
+        console.log(`⚠️ API returned invalid price for ${symbol} after ${maxRetries} attempts`);
+      }
+      
       retryCount++;
     } catch (error) {
-      console.error(`API error for ${symbol} (attempt ${retryCount + 1}):`, error.message);
+      // Only log errors on final attempt
+      if (retryCount === maxRetries - 1) {
+        console.error(`❌ API error for ${symbol}: ${error.message}`);
+      }
       retryCount++;
     }
   }
   
-  console.error(`Failed to fetch price for ${symbol} after ${maxRetries} attempts`);
   return null;
 }
 
 // --- Enhanced signal generation function ---
-const generateSignals = setInterval(async () => {
+async function generateSignals() {
+  // Simple check - if MongoDB is not connected, skip silently
   if (mongoose.connection.readyState !== 1) {
-    console.log('MongoDB not connected - skipping signal generation');
+    console.log('🔌 MongoDB not connected - skipping signal generation');
     return;
   }
 
   console.log('🤖 Starting signal generation...');
   
-  // Wait for price data to be available (2-3 minutes as requested)
-  const waitForPriceData = async () => {
-    const maxWaitTime = 3 * 60 * 1000; // 3 minutes
-    const checkInterval = 30 * 1000; // Check every 30 seconds
-    const startTime = Date.now();
-    
-    while (Date.now() - startTime < maxWaitTime) {
-      let allAssetsHaveData = true;
-      
-      for (const asset of assets) {
-        const priceHistory = priceHistories[asset.symbol] || [];
-        if (priceHistory.length < 20) {
-          allAssetsHaveData = false;
-          break;
-        }
-      }
-      
-      if (allAssetsHaveData) {
-        console.log('✅ All assets have sufficient price data');
-        return true;
-      }
-      
-      console.log('⏳ Waiting for more price data...');
-      await new Promise(resolve => setTimeout(resolve, checkInterval));
-    }
-    
-    console.log('⚠️ Timeout waiting for price data');
-    return false;
-  };
+  // Check if we have enough price data (no more waiting loops)
+  let assetsWithSufficientData = 0;
   
-  // Wait for price data before generating signals
-  const dataReady = await waitForPriceData();
-  if (!dataReady) {
-    console.log('❌ Insufficient price data - skipping signal generation');
+  for (const asset of assets) {
+    const priceHistory = priceHistories[asset.symbol] || [];
+    if (priceHistory.length >= 20) {
+      assetsWithSufficientData++;
+    }
+  }
+  
+  if (assetsWithSufficientData === 0) {
+    console.log('⚠️ No assets have sufficient price data yet - skipping signal generation');
     return;
   }
+  
+  console.log(`📊 Generating signals for ${assetsWithSufficientData}/${assets.length} assets with sufficient data`);
 
   // Process each asset type with specific logic
   for (const asset of assets) {
     try {
       const priceHistory = priceHistories[asset.symbol] || [];
       
-      // Enhanced data validation
+      // Skip if insufficient data
       if (priceHistory.length < 20) {
-        console.log(`⚠️ Skipping ${asset.symbol} - insufficient data (${priceHistory.length} points)`);
+        console.log(`⚪ Skipping ${asset.symbol} - only ${priceHistory.length} price points`);
         continue;
       }
-      
-      console.log(`📊 Generating signal for ${asset.symbol} (${asset.market}) with ${priceHistory.length} data points`);
       
       // --- Technical Indicators ---
       const rsiValues = RSI.calculate({ values: priceHistory, period: 14 });
@@ -873,10 +863,10 @@ const generateSignals = setInterval(async () => {
     }
   }
   
-  console.log('🎯 Signal generation completed');
-})
+  console.log('✅ Signal generation completed');
+}
 
-// --- Enhanced price history updater with rate limiting ---
+// --- Enhanced price history updater with better error handling ---
 const assets = [
   { symbol: 'BTCUSDT', market: 'crypto' },
   { symbol: 'ETHUSDT', market: 'crypto' },
@@ -895,9 +885,17 @@ let demoMonitorInterval;
 let marketUpdateInterval;
 let portfolioUpdateInterval;
 
-// --- Function to start all intervals (called after server starts) ---
-const startIntervals = () => {
-  console.log('🔄 Initializing all intervals and services...');
+// Track system state
+let systemState = {
+  priceCollectionStarted: false,
+  signalGenerationStarted: false,
+  initialPriceCollectionComplete: false,
+  startTime: Date.now()
+};
+
+// --- Enhanced function to start all intervals with better timing ---
+function startIntervals() {
+  console.log('🔄 Initializing enhanced trading system...');
   
   // Debug: Check all functions before starting intervals
   console.log('🔍 Function validation:');
@@ -915,50 +913,72 @@ const startIntervals = () => {
       console.error('⚠️ startPriceUpdates is not a function, type:', typeof startPriceUpdates);
     }
     
-    // Start price history updater
+    // Start price history updater immediately
+    console.log('📊 Starting price collection (5 minute warm-up before signals)...');
+    systemState.priceCollectionStarted = true;
+    
     priceHistoryInterval = setInterval(async () => {
-      console.log('🔄 Starting price history update...');
+      const currentTime = Date.now();
+      const elapsedMinutes = (currentTime - systemState.startTime) / (1000 * 60);
+      
+      // Only log every 5th update to reduce spam
+      const shouldLog = Math.floor(elapsedMinutes) % 5 === 0;
+      
+      if (shouldLog) {
+        console.log('🔄 Updating price history...');
+      }
+      
+      let successfulUpdates = 0;
+      let totalAttempts = 0;
       
       for (let i = 0; i < assets.length; i++) {
         const asset = assets[i];
+        totalAttempts++;
         
         try {
           // Add delay between requests to respect rate limits
           if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between assets
+            await new Promise(resolve => setTimeout(resolve, 12000)); // 12 second delay between assets
           }
           
           const price = await fetchLatestPriceWithRetry(asset.symbol, asset.market);
-          if (!price) {
-            console.log(`⚠️ Skipping ${asset.symbol} - no price data available`);
-            continue;
+          if (price) {
+            if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
+            priceHistories[asset.symbol].push(price);
+            
+            // Keep only the last 50 prices (increased from 30 for better analysis)
+            if (priceHistories[asset.symbol].length > 50) {
+              priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-50);
+            }
+            
+            successfulUpdates++;
+            
+            if (shouldLog) {
+              console.log(`✅ ${asset.symbol} (${asset.market}): $${price} (${priceHistories[asset.symbol].length} points)`);
+            }
+          } else {
+            if (shouldLog) {
+              console.log(`⚠️ Failed to fetch price for ${asset.symbol}`);
+            }
           }
-          
-          if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
-          priceHistories[asset.symbol].push(price);
-          
-          // Keep only the last 30 prices
-          if (priceHistories[asset.symbol].length > 30) {
-            priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-30);
-          }
-          
-          console.log(`✅ Updated ${asset.symbol} (${asset.market}): $${price} (${priceHistories[asset.symbol].length} points)`);
         } catch (error) {
-          console.error(`Error updating price history for ${asset.symbol}:`, error.message);
+          console.error(`❌ Error updating ${asset.symbol}:`, error.message);
         }
       }
       
-      console.log('✅ Price history update completed');
-    }, 2 * 60 * 1000); // every 2 minutes
+      if (shouldLog) {
+        console.log(`📊 Price update complete: ${successfulUpdates}/${totalAttempts} assets updated`);
+      }
+      
+      // Check if we should start signal generation (after 5 minutes)
+      if (!systemState.signalGenerationStarted && elapsedMinutes >= 5) {
+        console.log('🎯 5 minutes elapsed - Starting signal generation...');
+        startSignalGeneration();
+      }
+      
+    }, 90 * 1000); // every 90 seconds (more reasonable)
 
-    // Start signal generation
-    if (typeof generateSignals === 'function') {
-      signalGenerationInterval = setInterval(generateSignals, 15 * 60 * 1000); // every 15 minutes
-    } else {
-      console.error('⚠️ generateSignals is not a function');
-    }
-    
-    // Start demo monitoring interval
+    // Start other services
     if (typeof monitorDemoPositions === 'function') {
       demoMonitorInterval = setInterval(monitorDemoPositions, 60 * 1000); // every minute
     } else {
@@ -985,6 +1005,37 @@ const startIntervals = () => {
   } catch (error) {
     console.error('❌ Error starting intervals:', error.message);
     console.error('Stack:', error.stack);
+  }
+}
+
+// --- Separate function to start signal generation ---
+function startSignalGeneration() {
+  if (systemState.signalGenerationStarted) {
+    return; // Already started
+  }
+  
+  systemState.signalGenerationStarted = true;
+  
+  // Check data availability
+  let assetsWithData = 0;
+  assets.forEach(asset => {
+    const priceHistory = priceHistories[asset.symbol] || [];
+    if (priceHistory.length >= 20) {
+      assetsWithData++;
+    }
+  });
+  
+  console.log(`📈 Starting signal generation with ${assetsWithData}/${assets.length} assets ready`);
+  
+  // Start signal generation
+  if (typeof generateSignals === 'function') {
+    // Generate signals immediately
+    generateSignals();
+    
+    // Then every 15 minutes
+    signalGenerationInterval = setInterval(generateSignals, 15 * 60 * 1000);
+  } else {
+    console.error('⚠️ generateSignals is not a function');
   }
 }
 
