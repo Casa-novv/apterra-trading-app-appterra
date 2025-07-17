@@ -1058,7 +1058,7 @@ const generateSignals = setInterval(async () => {
   }
   
   console.log('🎯 Signal generation completed');
-}
+})
 
 // --- Enhanced price history updater with rate limiting ---
 const assets = [
