@@ -310,8 +310,7 @@ const startPriceUpdates = () => {
   }, 30000);
 };
 
-// Replace your existing price update logic with:
-startPriceUpdates();
+// Price updates will be started by startIntervals() function
 
 // --- Market Data Endpoint & Update ---
 app.get('/api/market/data', async (req, res) => {
@@ -358,9 +357,7 @@ async function updateMarketData() {
   }
 }
 
-const marketUpdateInterval = setInterval(updateMarketData, 5 * 60 * 1000);
-// Initial update after 10 seconds
-setTimeout(updateMarketData, 10 * 1000);
+// Market update interval will be started by startIntervals() function
 
 // --- Portfolio Endpoints & Update ---
 app.get('/api/portfolio', async (req, res) => {
@@ -402,8 +399,7 @@ async function updatePortfolioData() {
   }
 }
 
-const portfolioUpdateInterval = setInterval(updatePortfolioData, 5 * 60 * 1000);
-setTimeout(updatePortfolioData, 10 * 1000);
+// Portfolio update interval will be started by startIntervals() function
 
 // --- AI Signal Generation ---
 // Deep learning prediction and sentiment analysis functions
@@ -886,45 +882,69 @@ const assets = [
 // Declare interval variables at the top to avoid temporal dead zone issues
 let priceHistoryInterval;
 let signalGenerationInterval;
+let demoMonitorInterval;
+let marketUpdateInterval;
+let portfolioUpdateInterval;
 
-// --- Start price history updater ---
-priceHistoryInterval = setInterval(async () => {
-  console.log('🔄 Starting price history update...');
+// --- Function to start all intervals (called after server starts) ---
+function startIntervals() {
+  console.log('🔄 Initializing all intervals and services...');
   
-  for (let i = 0; i < assets.length; i++) {
-    const asset = assets[i];
+  // Start price update service
+  startPriceUpdates();
+  
+  // Start price history updater
+  priceHistoryInterval = setInterval(async () => {
+    console.log('🔄 Starting price history update...');
     
-    try {
-      // Add delay between requests to respect rate limits
-      if (i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between assets
+    for (let i = 0; i < assets.length; i++) {
+      const asset = assets[i];
+      
+      try {
+        // Add delay between requests to respect rate limits
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 15000)); // 15 second delay between assets
+        }
+        
+        const price = await fetchLatestPriceWithRetry(asset.symbol, asset.market);
+        if (!price) {
+          console.log(`⚠️ Skipping ${asset.symbol} - no price data available`);
+          continue;
+        }
+        
+        if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
+        priceHistories[asset.symbol].push(price);
+        
+        // Keep only the last 30 prices
+        if (priceHistories[asset.symbol].length > 30) {
+          priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-30);
+        }
+        
+        console.log(`✅ Updated ${asset.symbol} (${asset.market}): $${price} (${priceHistories[asset.symbol].length} points)`);
+      } catch (error) {
+        console.error(`Error updating price history for ${asset.symbol}:`, error.message);
       }
-      
-      const price = await fetchLatestPriceWithRetry(asset.symbol, asset.market);
-      if (!price) {
-        console.log(`⚠️ Skipping ${asset.symbol} - no price data available`);
-        continue;
-      }
-      
-      if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
-      priceHistories[asset.symbol].push(price);
-      
-      // Keep only the last 30 prices
-      if (priceHistories[asset.symbol].length > 30) {
-        priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-30);
-      }
-      
-      console.log(`✅ Updated ${asset.symbol} (${asset.market}): $${price} (${priceHistories[asset.symbol].length} points)`);
-    } catch (error) {
-      console.error(`Error updating price history for ${asset.symbol}:`, error.message);
     }
-  }
-  
-  console.log('✅ Price history update completed');
-}, 2 * 60 * 1000); // every 2 minutes
+    
+    console.log('✅ Price history update completed');
+  }, 2 * 60 * 1000); // every 2 minutes
 
-// --- Start signal generation ---
-signalGenerationInterval = setInterval(generateSignals, 15 * 60 * 1000); // every 15 minutes
+  // Start signal generation
+  signalGenerationInterval = setInterval(generateSignals, 15 * 60 * 1000); // every 15 minutes
+  
+  // Start demo monitoring interval
+  demoMonitorInterval = setInterval(monitorDemoPositions, 60 * 1000); // every minute
+  
+  // Start market update interval
+  marketUpdateInterval = setInterval(updateMarketData, 5 * 60 * 1000);
+  setTimeout(updateMarketData, 10 * 1000); // Initial update after 10 seconds
+  
+  // Start portfolio update interval
+  portfolioUpdateInterval = setInterval(updatePortfolioData, 5 * 60 * 1000);
+  setTimeout(updatePortfolioData, 10 * 1000); // Initial update after 10 seconds
+  
+  console.log('✅ All intervals started successfully');
+}
 
 // --- Signals API Endpoint ---
 app.get('/api/signals', async (req, res) => {
@@ -1041,8 +1061,7 @@ try {
   monitorDemoPositions = () => console.log('Demo position monitoring skipped - module not found');
 }
 
-// Start the monitoring interval regardless of whether the module was found
-demoMonitorInterval = setInterval(monitorDemoPositions, 60 * 1000); // every minute
+// Demo monitoring interval will be started by startIntervals() function
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -1165,6 +1184,11 @@ const startServer = async () => {
       console.log(`Portfolio Updates: ✅ Every 5 minutes`);
       console.log(`Signal Generation: ✅ Every 15 minutes`);
       console.log(`Demo Position Monitor: ✅ Every minute`);
+      
+      // Start intervals after server is fully initialized
+      setTimeout(() => {
+        startIntervals();
+      }, 3000); // Wait 3 seconds for everything to be fully initialized
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);
