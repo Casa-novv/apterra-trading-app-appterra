@@ -488,95 +488,6 @@ const updatePriceHistories = async () => {
   }
 };
 
-// Define the signal generation function
-const generateSignals = async () => {
-  try {
-    console.log('🤖 Starting enhanced signal generation...');
-    
-    // Get all price histories
-    const priceHistories = await PriceHistory.find({}).sort({ timestamp: -1 });
-    const groupedBySymbol = {};
-    
-    priceHistories.forEach(entry => {
-      if (!groupedBySymbol[entry.symbol]) {
-        groupedBySymbol[entry.symbol] = [];
-      }
-      groupedBySymbol[entry.symbol].push(entry.price);
-    });
-    
-    console.log('📊 Current price histories:');
-    Object.keys(groupedBySymbol).forEach(symbol => {
-      console.log(`  ${symbol}: ${groupedBySymbol[symbol].length} data points`);
-    });
-    
-    let signalsGenerated = 0;
-    
-    // Reduced minimum data points from 5 to 2
-    const MIN_DATA_POINTS = 2;
-    
-    for (const asset of TRADING_ASSETS) {
-      try {
-        const priceHistory = groupedBySymbol[asset.symbol] || [];
-        
-        if (priceHistory.length < MIN_DATA_POINTS) {
-          console.log(`⏭️ ${asset.symbol}: Insufficient data (${priceHistory.length}/${MIN_DATA_POINTS})`);
-          continue;
-        }
-        
-        console.log(`🔍 Analyzing ${asset.symbol} (${asset.market})...`);
-        
-        // Simple signal generation for now
-        const currentPrice = priceHistory[0];
-        const previousPrice = priceHistory[1];
-        const priceChange = ((currentPrice - previousPrice) / previousPrice) * 100;
-        
-        let signalType = null;
-        let confidence = 50;
-        
-        // Simple momentum-based signals
-        if (priceChange > 0.5) {
-          signalType = 'BUY';
-          confidence = Math.min(95, 60 + Math.abs(priceChange) * 10);
-        } else if (priceChange < -0.5) {
-          signalType = 'SELL';
-          confidence = Math.min(95, 60 + Math.abs(priceChange) * 10);
-        }
-        
-        if (signalType && confidence >= 55) {
-          // Create and save signal
-          const signal = new Signal({
-            symbol: asset.symbol,
-            type: signalType,
-            confidence: Math.round(confidence),
-            entryPrice: currentPrice,
-            targetPrice: signalType === 'BUY' ? currentPrice * 1.02 : currentPrice * 0.98,
-            stopLoss: signalType === 'BUY' ? currentPrice * 0.98 : currentPrice * 1.02,
-            market: asset.market,
-            timeframe: '1H',
-            description: `${signalType} signal based on ${priceChange.toFixed(2)}% price movement`,
-            timestamp: new Date()
-          });
-          
-          await signal.save();
-          signalsGenerated++;
-          
-          console.log(`✅ ${asset.symbol}: ${signalType} signal generated (${confidence}% confidence)`);
-        } else {
-          console.log(`⏭️ ${asset.symbol}: No signal generated (${signalType}, ${confidence}% confidence)`);
-        }
-        
-      } catch (error) {
-        console.error(`❌ Error generating signal for ${asset.symbol}:`, error.message);
-      }
-    }
-    
-    console.log(`🎯 Signal generation completed: ${signalsGenerated} signals generated`);
-    
-  } catch (error) {
-    console.error('❌ Error in signal generation:', error.message);
-  }
-};
-
 // Now set up the intervals AFTER the functions are defined
 console.log('⏰ Setting up intervals...');
 
@@ -590,34 +501,6 @@ signalGenerationInterval = setInterval(generateSignals, 2 * 60 * 1000);
 console.log('🚀 Starting initial updates...');
 updatePrices();
 setTimeout(generateSignals, 5000); // Wait 5 seconds before first signal generation
-
-// Graceful shutdown (place this at the very end of your file)
-const gracefulShutdown = (signal) => {
-  console.log(`📴 Received ${signal}. Shutting down gracefully...`);
-  
-  // Clear intervals if they exist
-  if (priceUpdateInterval) {
-    clearInterval(priceUpdateInterval);
-    console.log('✅ Price update interval cleared');
-  }
-  if (signalGenerationInterval) {
-    clearInterval(signalGenerationInterval);
-    console.log('✅ Signal generation interval cleared');
-  }
-  
-  // Close database connection
-  if (mongoose.connection.readyState === 1) {
-    mongoose.connection.close(() => {
-      console.log('📴 Database connection closed.');
-      process.exit(0);
-    });
-  } else {
-    process.exit(0);
-  }
-};
-
-process.on('SIGINT', gracefulShutdown);
-process.on('SIGTERM', gracefulShutdown);
 
 // --- Market Data Endpoint & Update ---
 app.get('/api/market/data', async (req, res) => {
@@ -928,12 +811,8 @@ const assets = [
   { symbol: 'COPPER', market: 'commodities', priority: 'low' },
 ];
 
-// Declare interval variables at the top to avoid temporal dead zone issues
-let priceHistoryInterval;
-let signalGenerationInterval;
-
 // --- Enhanced signal generation function ---
-async function generateSignals() {
+const generateSignals = setInterval(async () => {
   if (mongoose.connection.readyState !== 1) {
     console.log('MongoDB not connected - skipping signal generation');
     return;
@@ -1063,7 +942,7 @@ const signalGenerationInterval = setInterval(async () => {
   }
   
   console.log('🎯 Signal generation completed');
-}
+})
 
 // --- Start price history updater ---
 priceHistoryInterval = setInterval(async () => {
