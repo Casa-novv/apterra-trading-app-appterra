@@ -1,5 +1,23 @@
 const axios = require('axios');
 
+// Helper for retry logic with exponential backoff
+async function retryWithBackoff(fn, retries = 3, delay = 1000, factor = 2) {
+  let attempt = 0;
+  let lastError;
+  while (attempt < retries) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries - 1) {
+        await new Promise(res => setTimeout(res, delay * Math.pow(factor, attempt)));
+      }
+      attempt++;
+    }
+  }
+  throw lastError;
+}
+
 class ForexService {
   constructor() {
     this.baseURL = 'https://api.exchangerate.host';
@@ -9,13 +27,13 @@ class ForexService {
   async getExchangeRate(fromCurrency, toCurrency) {
     try {
       // Primary API
-      const response = await axios.get(`${this.baseURL}/latest`, {
+      const response = await retryWithBackoff(() => axios.get(`${this.baseURL}/latest`, {
         params: {
           base: fromCurrency,
           symbols: toCurrency
         },
         timeout: 8000
-      });
+      }), 4, 1000, 2);
 
       if (response.data && response.data.rates && response.data.rates[toCurrency]) {
         return {
@@ -29,13 +47,13 @@ class ForexService {
 
     try {
       // Fallback API
-      const response = await axios.get(`${this.fallbackURL}/latest`, {
+      const response = await retryWithBackoff(() => axios.get(`${this.fallbackURL}/latest`, {
         params: {
           base: fromCurrency,
           symbols: toCurrency
         },
         timeout: 8000
-      });
+      }), 4, 1000, 2);
 
       if (response.data && response.data.rates && response.data.rates[toCurrency]) {
         return {

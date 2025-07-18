@@ -9,6 +9,24 @@ function detectMarket(symbol) {
   return 'crypto';
 }
 
+// Helper for retry logic with exponential backoff
+async function retryWithBackoff(fn, retries = 3, delay = 1000, factor = 2) {
+  let attempt = 0;
+  let lastError;
+  while (attempt < retries) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries - 1) {
+        await new Promise(res => setTimeout(res, delay * Math.pow(factor, attempt)));
+      }
+      attempt++;
+    }
+  }
+  throw lastError;
+}
+
 // --- Main price fetcher ---
 module.exports = async function getPrice(symbol) {
   const market = detectMarket(symbol);
@@ -17,7 +35,7 @@ module.exports = async function getPrice(symbol) {
   if (market === 'crypto') {
     // Binance expects e.g. BTCUSDT, ETHUSDT
     try {
-      const res = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+      const res = await retryWithBackoff(() => axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`), 4, 1000, 2);
       return parseFloat(res.data.price);
     } catch (e) {
       throw new Error(`Failed to fetch crypto price for ${symbol}`);
@@ -29,7 +47,7 @@ module.exports = async function getPrice(symbol) {
     // symbol like EUR/USD
     const [base, quote] = symbol.split('/');
     try {
-      const res = await axios.get(`https://api.twelvedata.com/price?symbol=${base}${quote}&apikey=demo`);
+      const res = await retryWithBackoff(() => axios.get(`https://api.twelvedata.com/price?symbol=${base}${quote}&apikey=demo`), 4, 1000, 2);
       if (res.data && res.data.price) return parseFloat(res.data.price);
       throw new Error();
     } catch (e) {
@@ -42,13 +60,13 @@ module.exports = async function getPrice(symbol) {
     // You need a free API key from https://www.alphavantage.co/support/#api-key
     const API_KEY = process.env.ALPHA_VANTAGE_KEY || 'demo';
     try {
-      const res = await axios.get(`https://www.alphavantage.co/query`, {
+      const res = await retryWithBackoff(() => axios.get(`https://www.alphavantage.co/query`, {
         params: {
           function: 'GLOBAL_QUOTE',
           symbol,
           apikey: API_KEY,
         },
-      });
+      }), 4, 1000, 2);
       const price = res.data['Global Quote'] && res.data['Global Quote']['05. price'];
       if (price) return parseFloat(price);
       throw new Error();

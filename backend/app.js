@@ -1,9 +1,22 @@
+// Recommendations for further improvements:
+// 1. Implement retry logic and exponential backoff for all external API calls.
+// 2. Add more robust error logging and alerting (e.g., email or Slack notifications on repeated failures).
+// 3. Cache API responses to reduce rate limit issues and improve performance.
+// 4. Use environment variables for all API keys and sensitive config.
+// 5. Add unit and integration tests for all major service functions.
+// 6. Consider using a job queue (like Bull or Agenda) for background tasks and interval jobs.
+// 7. Add API rate limiters to protect external services and your own endpoints.
+// 8. Use a monitoring tool (like PM2, New Relic, or Sentry) for production deployments.
+// 9. Document all endpoints and services using Swagger or similar tools.
+// 10. Regularly review and update dependencies to address security vulnerabilities.
 require('dotenv').config();
 let Signal, Market, Portfolio, PriceHistory;
 let signalGenerationInterval;
 let marketUpdateInterval;
 let portfolioUpdateInterval;
 let demoPositionInterval;
+let priceUpdateCycle = 0;
+let priceHistoryCycle = 0;
 
 
 const express = require('express');
@@ -147,6 +160,9 @@ const TRADING_ASSETS = [
   { symbol: 'SILVER', market: 'commodities', name: 'Silver' }
 ];
 
+// Fix: Define assets alias for TRADING_ASSETS
+const assets = TRADING_ASSETS;
+
 // Initialize MongoDB connection with graceful fallback
 (async () => {
   try {
@@ -196,11 +212,12 @@ app.get('/api/health', (req, res) => {
   });
 });
 // At the very top of your file (after imports but before any other code)
-let priceUpdateInterval;
 try {
   Signal = require('./models/Signal');     // AI signals
   Market = require('./models/Market');       // Market data
   Portfolio = require('./models/Portfolio'); // Portfolio holdings
+  // Fix: Load PriceHistory model
+  PriceHistory = require('./models/MarketData');
   console.log('✅ Models loaded successfully');
 } catch (error) {
   console.error('❌ Error loading models:', error.message);
@@ -387,8 +404,28 @@ const getCoinGeckoId = (symbol) => {
   return mapping[symbol];
 };
 
+// Add this helper to save prices to the database
+async function savePricesToDatabase(priceArray) {
+  for (const { symbol, price } of priceArray) {
+    try {
+      await PriceHistory.create({
+        symbol,
+        price,
+        timestamp: new Date(),
+      });
+    } catch (err) {
+      console.error(`❌ Error saving price for ${symbol}:`, err.message);
+    }
+  }
+}
+
 // Define the updatePrices function
 const updatePrices = async () => {
+  priceUpdateCycle++;
+  // Log only every 10th cycle
+  if (priceUpdateCycle % 10 === 0) {
+    console.log(`🔄 Price update cycle #${priceUpdateCycle}`);
+  }
   try {
     console.log('🔄 Starting price update cycle...');
     
@@ -396,24 +433,23 @@ const updatePrices = async () => {
     const symbols = assets.map(asset => asset.symbol);
     console.log(`🔍 Fetching prices for: ${symbols.join(', ')}`);
     
-    const results = await fetchPricesFromMultipleAPIs(symbols);
-    
-    if (results.length > 0) {
-      // Save to database
-      await savePricesToDatabase(results);
-      console.log(`✅ Updated ${results.length} prices successfully`);
-      
+    const results = await fetchCurrentPrices();
+    // results is an object like { BTC: price, ETH: price, ... }
+    if (results && Object.keys(results).length > 0) {
+      // Convert results object to array of price objects for savePricesToDatabase
+      const priceArray = Object.entries(results).map(([symbol, price]) => ({ symbol, price }));
+      await savePricesToDatabase(priceArray);
+      console.log(`✅ Updated ${priceArray.length} prices successfully`);
       // Update price histories
       await updatePriceHistories();
-      
       // Emit to connected clients if io is available
       if (typeof io !== 'undefined') {
-        io.emit('priceUpdate', results);
+        io.emit('priceUpdate', priceArray);
         io.emit('portfolioUpdate', { message: 'Portfolio data updated' });
         io.emit('marketDataUpdate', { message: 'Market data updated' });
       }
     } else {
-      console.error('⚠️ marketService.updatePrices is not available');
+      console.error('⚠️ No prices fetched from fetchCurrentPrices');
     }
   } catch (error) {
     console.error('❌ Error in updatePrices:', error.message);
@@ -422,6 +458,11 @@ const updatePrices = async () => {
 
 // Define the updatePriceHistories function
 const updatePriceHistories = async () => {
+  priceHistoryCycle++;
+  // Log only every 10th cycle
+  if (priceHistoryCycle % 10 === 0) {
+    console.log(`🔄 Price history update cycle #${priceHistoryCycle}`);
+  }
   try {
     console.log('🔄 Updating price histories...');
     
@@ -798,8 +839,8 @@ async function generateSignals() {
 // Now set up the intervals AFTER the functions are defined
 console.log('⏰ Setting up intervals...');
 
-// Start price updates every 30 seconds
-priceUpdateInterval = setInterval(updatePrices, 30 * 1000);
+// Start price updates every 5 minutes (development)
+setInterval(updatePrices, 30 * 1000); // every 30 seconds
 
 // Start signal generation every 2 minutes  
 signalGenerationInterval = setInterval(generateSignals, 2 * 60 * 1000);
@@ -807,6 +848,7 @@ signalGenerationInterval = setInterval(generateSignals, 2 * 60 * 1000);
 // Initial calls
 console.log('🚀 Starting initial updates...');
 updatePrices();
+updatePriceHistories();
 setTimeout(generateSignals, 5000); // Wait 5 seconds before first signal generation
 
 
@@ -1045,336 +1087,37 @@ async function fetchLatestPriceWithRetry(symbol, market, maxRetries = 2) {
   
   return null;
 }
-// Enhanced price history updater with better error handling
-const priceHistoryInterval = setInterval(async () => {
-  console.log('🔄 Updating price histories...');
-  
-  // Debug: Check all functions before starting intervals
-  console.log('🔍 Function validation:');
-  console.log(`- startPriceUpdates: ${typeof startPriceUpdates}`);
-  console.log(`- generateSignals: ${typeof generateSignals}`);
-  console.log(`- monitorDemoPositions: ${typeof monitorDemoPositions}`);
-  console.log(`- updateMarketData: ${typeof updateMarketData}`);
-  console.log(`- updatePortfolioData: ${typeof updatePortfolioData}`);
-  
-  try {
-    // Start price update service
-    if (typeof startPriceUpdates === 'function') {
-      startPriceUpdates();
-    } else {
-      console.error('⚠️ startPriceUpdates is not a function, type:', typeof startPriceUpdates);
-    }
-    
-    // Start price history updater immediately
-    console.log('📊 Starting price collection (5 minute warm-up before signals)...');
-    systemState.priceCollectionStarted = true;
-    
-    priceHistoryInterval = setInterval(async () => {
-      const currentTime = Date.now();
-      const elapsedMinutes = (currentTime - systemState.startTime) / (1000 * 60);
-      
-      // Only log every 5th update to reduce spam
-      const shouldLog = Math.floor(elapsedMinutes) % 5 === 0;
-      
-      if (shouldLog) {
-        console.log('🔄 Updating price history...');
-      }
-      
-      let successfulUpdates = 0;
-      let totalAttempts = 0;
-      
-      for (let i = 0; i < assets.length; i++) {
-        const asset = assets[i];
-        totalAttempts++;
-        
-        try {
-          // Add delay between requests to respect rate limits
-          if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 12000)); // 12 second delay between assets
-          }
-          
-          const price = await fetchLatestPriceWithRetry(asset.symbol, asset.market);
-          if (price) {
-            if (!priceHistories[asset.symbol]) priceHistories[asset.symbol] = [];
-            priceHistories[asset.symbol].push(price);
-            
-            // Keep only the last 50 prices (increased from 30 for better analysis)
-            if (priceHistories[asset.symbol].length > 50) {
-              priceHistories[asset.symbol] = priceHistories[asset.symbol].slice(-50);
-            }
-            
-            successfulUpdates++;
-            
-            if (shouldLog) {
-              console.log(`✅ ${asset.symbol} (${asset.market}): $${price} (${priceHistories[asset.symbol].length} points)`);
-            }
-          } else {
-            if (shouldLog) {
-              console.log(`⚠️ Failed to fetch price for ${asset.symbol}`);
-            }
-          }
-        } catch (error) {
-          console.error(`❌ Error updating ${asset.symbol}:`, error.message);
-        }
-      }
-      
-      if (shouldLog) {
-        console.log(`📊 Price update complete: ${successfulUpdates}/${totalAttempts} assets updated`);
-      }
-      
-      // Check if we should start signal generation (after 5 minutes)
-      if (!systemState.signalGenerationStarted && elapsedMinutes >= 5) {
-        console.log('🎯 5 minutes elapsed - Starting signal generation...');
-        startSignalGeneration();
-      }
-      
-    }, 90 * 1000); // every 90 seconds (more reasonable)
 
-    // Start other services
-    if (typeof monitorDemoPositions === 'function') {
-      demoMonitorInterval = setInterval(monitorDemoPositions, 60 * 1000); // every minute
-    } else {
-      console.error('⚠️ monitorDemoPositions is not a function');
-    }
-    
-    // Start market update interval
-    if (typeof updateMarketData === 'function') {
-      marketUpdateInterval = setInterval(updateMarketData, 5 * 60 * 1000);
-      setTimeout(updateMarketData, 10 * 1000); // Initial update after 10 seconds
-    } else {
-      console.error('⚠️ updateMarketData is not a function');
-    }
-    
-    // Start portfolio update interval
-    if (typeof updatePortfolioData === 'function') {
-      portfolioUpdateInterval = setInterval(updatePortfolioData, 5 * 60 * 1000);
-      setTimeout(updatePortfolioData, 10 * 1000); // Initial update after 10 seconds
-    } else {
-      console.error('⚠️ updatePortfolioData is not a function');
-    }
-    
-    console.log('✅ All intervals started successfully');
-  } catch (error) {
-    console.error('❌ Error starting intervals:', error.message);
-    console.error('Stack:', error.stack);
-  }
-});
-
-// ✅ Define the missing startPriceUpdates function
-const startPriceUpdates = async () => {
-  try {
-    console.log('🔄 Starting price updates...');
-    systemState.priceUpdatesActive = true;
-    
-    for (const asset of TRADING_ASSETS) {
-      try {
-        let price = null;
-        let source = 'fallback';
-        
-        if (asset.market === 'crypto') {
-          try {
-            const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${asset.symbol}`, {
-              timeout: 5000
-            });
-            price = parseFloat(response.data.price);
-            source = 'Binance';
-          } catch (error) {
-            price = 50000 + (Math.random() - 0.5) * 10000;
-            source = 'fallback';
-          }
-        } else {
-          const fallbackPrices = {
-            'EURUSD': 1.0850 + (Math.random() - 0.5) * 0.01,
-            'GBPUSD': 1.2650 + (Math.random() - 0.5) * 0.01,
-            'USDJPY': 149.50 + (Math.random() - 0.5) * 1,
-            'AAPL': 175.50 + (Math.random() - 0.5) * 5,
-            'GOOGL': 2800 + (Math.random() - 0.5) * 50,
-            'TSLA': 240 + (Math.random() - 0.5) * 10,
-            'GOLD': 2650 + (Math.random() - 0.5) * 20,
-            'OIL': 68.5 + (Math.random() - 0.5) * 5
-          };
-          price = fallbackPrices[asset.symbol] || 100 + (Math.random() - 0.5) * 10;
-        }
-        
-        if (price && !isNaN(price) && price > 0) {
-          const priceHistory = new PriceHistory({
-            symbol: asset.symbol,
-            price: price,
-            timestamp: new Date(),
-            market: asset.market,
-            source: source
-          });
-          
-          await priceHistory.save();
-          console.log(`✅ ${asset.symbol}: ${price} (${source})`);
-        }
-        
-      } catch (error) {
-        console.error(`❌ Error fetching ${asset.symbol}:`, error.message);
+// Helper for retry logic with exponential backoff
+async function retryWithBackoff(fn, retries = 3, delay = 1000, factor = 2) {
+  let attempt = 0;
+  let lastError;
+  while (attempt < retries) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries - 1) {
+        await new Promise(res => setTimeout(res, delay * Math.pow(factor, attempt)));
       }
+      attempt++;
     }
-    
-    systemState.lastPriceUpdate = new Date();
-    systemState.totalPriceUpdates++;
-    console.log('✅ Price updates completed');
-    
-  } catch (error) {
-    console.error('❌ Error in startPriceUpdates:', error.message);
-    systemState.priceUpdatesActive = false;
   }
-};
-
-// --- Separate function to start signal generation ---
-function startSignalGeneration() {
-  if (systemState.signalGenerationStarted) {
-    return; // Already started
-  }
-  
-  systemState.signalGenerationStarted = true;
-  
-  // Check data availability
-  let assetsWithData = 0;
-  assets.forEach(asset => {
-    const priceHistory = priceHistories[asset.symbol] || [];
-    if (priceHistory.length >= 20) {
-      assetsWithData++;
-    }
-  });
-  
-  console.log(`📈 Starting signal generation with ${assetsWithData}/${assets.length} assets ready`);
-  
-  // Start signal generation
-  if (typeof generateSignals === 'function') {
-    // Generate signals immediately
-    generateSignals();
-    
-    // Then every 15 minutes
-    signalGenerationInterval = setInterval(generateSignals, 15 * 60 * 1000);
-  } else {
-    console.error('⚠️ generateSignals is not a function');
-  }
+  throw lastError;
 }
-
-// --- Signals API Endpoint ---
-app.get('/api/signals', async (req, res) => {
-  try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({ error: 'Database not connected' });
-    }
-    
-    const signals = await Signal.find({ status: 'active' });
-    res.json({ signals });
-  } catch (err) {
-    console.error('Error fetching signals:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-// Add this RIGHT AFTER your existing /api/signals route
-console.log('📈 Adding price endpoints...');
-
-// Single price endpoint
-app.get('/api/price/:symbol', async (req, res) => {
-  try {
-    const { symbol } = req.params;
-    console.log(`📈 Fetching price for ${symbol}`);
-    
-    const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, {
-      timeout: 10000
-    });
-    
-    const price = Number(response.data.price);
-    console.log(`✅ Got price for ${symbol}: $${price}`);
-    
-    res.json({ 
-      symbol, 
-      price,
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    console.error(`❌ Price fetch failed for ${req.params.symbol}:`, error.message);
-    res.status(500).json({ 
-      error: 'Failed to fetch price',
-      symbol: req.params.symbol,
-      message: error.message
-    });
-  }
-});
-
-// Bulk prices endpoint
-app.post('/api/prices', async (req, res) => {
-  try {
-    const { symbols } = req.body;
-    console.log(`📈 Backend fetching prices for symbols:`, symbols);
-    
-    const prices = {};
-    
-    for (const symbol of symbols) {
-      try {
-        const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, {
-          timeout: 5000
-        });
-        prices[symbol] = Number(response.data.price);
-        console.log(`✅ ${symbol}: $${prices[symbol]}`);
-      } catch (error) {
-        console.error(`❌ Failed to fetch ${symbol}:`, error.message);
-        prices[symbol] = null;
-      }
-    }
-    
-    res.json({ 
-      prices,
-      timestamp: new Date().toISOString(),
-      source: 'binance'
-    });
-    
-  } catch (error) {
-    console.error('❌ Bulk price fetch failed:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to fetch prices',
-      message: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
-});
-
-console.log('✅ Price endpoints added');
-// Fetch historical close prices from Binance (for crypto symbols)
-async function getPriceHistory(symbol, length = 50) {
-  try {
-    // Binance expects symbols like BTCUSDT, ETHUSDT, etc.
-    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=${length}`;
-    const response = await fetch(url, { timeout: 10000 });
-    const data = await response.json();
-    
-    if (!Array.isArray(data)) return [];
-    
-    // Each item: [openTime, open, high, low, close, ...]
-    return data.map(item => parseFloat(item[4])); // close prices
-  } catch (error) {
-    console.error(`Error fetching price history for ${symbol}:`, error.message);
-    return [];
-  }
+// Example usage for a price fetch (Binance):
+async function fetchBinancePrice(symbol) {
+  return retryWithBackoff(
+    async () => {
+      const response = await axios.get(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, { timeout: 10000 });
+      if (!response.data.price) throw new Error('No price in response');
+      return parseFloat(response.data.price);
+    },
+    4, // retries
+    1000, // initial delay
+    2 // exponential factor
+  );
 }
-
-// --- Demo Position Monitoring Job ---
-let monitorDemoPositions;
-try {
-  const demoMonitor = require('./jobs/demoPositionMonitor');
-  monitorDemoPositions = demoMonitor.monitorDemoPositions;
-  console.log('✅ Demo position monitor loaded');
-} catch (error) {
-  console.error('⚠️ Demo position monitor not found:', error.message);
-  // Create a mock function to prevent crashes
-  monitorDemoPositions = () => console.log('Demo position monitoring skipped - module not found');
-}
-
-// Ensure monitorDemoPositions is always a function
-if (typeof monitorDemoPositions !== 'function') {
-  monitorDemoPositions = () => console.log('Demo position monitoring disabled - no valid function');
-}
-
-// Demo monitoring interval will be started by startIntervals() function
 
 // Enhanced error handling middleware
 app.use((err, req, res, next) => {
@@ -1441,3 +1184,9 @@ const gracefulShutdown = async (signal) => {
     process.exit(0);
   });
 };
+
+// Start the HTTP server (add this at the end of the file)
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});

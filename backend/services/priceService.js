@@ -1,5 +1,23 @@
 const axios = require('axios');
 
+// Helper for retry logic with exponential backoff
+async function retryWithBackoff(fn, retries = 3, delay = 1000, factor = 2) {
+  let attempt = 0;
+  let lastError;
+  while (attempt < retries) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries - 1) {
+        await new Promise(res => setTimeout(res, delay * Math.pow(factor, attempt)));
+      }
+      attempt++;
+    }
+  }
+  throw lastError;
+}
+
 class PriceService {
   constructor() {
     this.rateLimits = {
@@ -52,26 +70,20 @@ class PriceService {
 
   async fetchFromCoinGecko(symbols) {
     if (!this.canUseAPI('coinGecko')) return null;
-    
     try {
       console.log('🦎 Attempting CoinGecko...');
-      
-      // Convert symbols to CoinGecko format
       const coinGeckoIds = this.symbolsToCoinGeckoIds(symbols);
       if (coinGeckoIds.length === 0) return null;
-      
-      const response = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
+      const response = await retryWithBackoff(() => axios.get('https://api.coingecko.com/api/v3/simple/price', {
         params: {
           ids: coinGeckoIds.join(','),
           vs_currencies: 'usd',
           include_24hr_change: true
         },
         timeout: 10000
-      });
-      
+      }), 4, 1000, 2);
       this.markAPICall('coinGecko', true);
       console.log('✅ CoinGecko success');
-      
       return this.formatCoinGeckoResponse(response.data, symbols);
     } catch (error) {
       this.markAPICall('coinGecko', false);
@@ -82,21 +94,16 @@ class PriceService {
 
   async fetchFromBinance(symbols) {
     if (!this.canUseAPI('binance')) return null;
-    
     try {
       console.log('🟡 Attempting Binance...');
-      
       const binanceSymbols = symbols.filter(s => s.includes('USDT') || s.includes('BTC'));
       if (binanceSymbols.length === 0) return null;
-      
       const promises = binanceSymbols.map(symbol => 
-        axios.get(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`, { timeout: 5000 })
+        retryWithBackoff(() => axios.get(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`, { timeout: 5000 }), 4, 1000, 2)
       );
-      
       const responses = await Promise.allSettled(promises);
       this.markAPICall('binance', true);
       console.log('✅ Binance success');
-      
       const prices = {};
       responses.forEach((response, index) => {
         if (response.status === 'fulfilled') {
@@ -107,7 +114,6 @@ class PriceService {
           };
         }
       });
-      
       return prices;
     } catch (error) {
       this.markAPICall('binance', false);

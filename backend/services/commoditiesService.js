@@ -1,5 +1,23 @@
 const axios = require('axios');
 
+// Helper for retry logic with exponential backoff
+async function retryWithBackoff(fn, retries = 3, delay = 1000, factor = 2) {
+  let attempt = 0;
+  let lastError;
+  while (attempt < retries) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries - 1) {
+        await new Promise(res => setTimeout(res, delay * Math.pow(factor, attempt)));
+      }
+      attempt++;
+    }
+  }
+  throw lastError;
+}
+
 class CommoditiesService {
   constructor() {
     this.metalsPriceAPI = 'https://api.metals.live/v1/spot';
@@ -33,18 +51,14 @@ class CommoditiesService {
 
   async getGoldPrice() {
     try {
-      const response = await axios.get(`${this.metalsPriceAPI}/gold`, {
-        timeout: 8000
-      });
+      const response = await retryWithBackoff(() => axios.get(`${this.metalsPriceAPI}/gold`, { timeout: 8000 }), 4, 1000, 2);
       return {
         price: response.data.price,
         source: 'metals.live'
       };
     } catch (error) {
       // Fallback to Yahoo Finance
-      const response = await axios.get('https://query1.finance.yahoo.com/v7/finance/quote?symbols=GC=F', {
-        timeout: 8000
-      });
+      const response = await retryWithBackoff(() => axios.get('https://query1.finance.yahoo.com/v7/finance/quote?symbols=GC=F', { timeout: 8000 }), 4, 1000, 2);
       const price = response.data.quoteResponse?.result?.[0]?.regularMarketPrice;
       if (price) {
         return { price, source: 'yahoo' };
@@ -55,17 +69,13 @@ class CommoditiesService {
 
   async getSilverPrice() {
     try {
-      const response = await axios.get(`${this.metalsPriceAPI}/silver`, {
-        timeout: 8000
-      });
+      const response = await retryWithBackoff(() => axios.get(`${this.metalsPriceAPI}/silver`, { timeout: 8000 }), 4, 1000, 2);
       return {
         price: response.data.price,
         source: 'metals.live'
       };
     } catch (error) {
-      const response = await axios.get('https://query1.finance.yahoo.com/v7/finance/quote?symbols=SI=F', {
-        timeout: 8000
-      });
+      const response = await retryWithBackoff(() => axios.get('https://query1.finance.yahoo.com/v7/finance/quote?symbols=SI=F', { timeout: 8000 }), 4, 1000, 2);
       const price = response.data.quoteResponse?.result?.[0]?.regularMarketPrice;
       if (price) {
         return { price, source: 'yahoo' };
@@ -76,9 +86,7 @@ class CommoditiesService {
 
   async getOilPrice() {
     try {
-      const response = await axios.get('https://query1.finance.yahoo.com/v7/finance/quote?symbols=CL=F', {
-        timeout: 8000
-      });
+      const response = await retryWithBackoff(() => axios.get('https://query1.finance.yahoo.com/v7/finance/quote?symbols=CL=F', { timeout: 8000 }), 4, 1000, 2);
       const price = response.data.quoteResponse?.result?.[0]?.regularMarketPrice;
       if (price) {
         return { price, source: 'yahoo' };
@@ -91,9 +99,7 @@ class CommoditiesService {
 
   async getCopperPrice() {
     try {
-      const response = await axios.get('https://query1.finance.yahoo.com/v7/finance/quote?symbols=HG=F', {
-        timeout: 8000
-      });
+      const response = await retryWithBackoff(() => axios.get('https://query1.finance.yahoo.com/v7/finance/quote?symbols=HG=F', { timeout: 8000 }), 4, 1000, 2);
       const price = response.data.quoteResponse?.result?.[0]?.regularMarketPrice;
       if (price) {
         return { price, source: 'yahoo' };
