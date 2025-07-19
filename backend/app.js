@@ -10,7 +10,7 @@
 // 9. Document all endpoints and services using Swagger or similar tools.
 // 10. Regularly review and update dependencies to address security vulnerabilities.
 require('dotenv').config();
-let Signal, Market, Portfolio, PriceHistory;
+let Signal, Market, Portfolio, PriceHistory, DemoTrade;
 let signalGenerationInterval;
 let marketUpdateInterval;
 let portfolioUpdateInterval;
@@ -27,7 +27,7 @@ const WebSocket = require('ws');
 const fetch = require('node-fetch');
 const axios = require('axios');
 // Instead of ta, we use technicalindicators:
-const { RSI, MACD, Stochastic, BollingerBands } = require('technicalindicators');
+const { RSI, MACD, Stochastic, BollingerBands, ATR, ADX, CCI } = require('technicalindicators');
 const jwt = require('jsonwebtoken');
 const Sentiment = require('sentiment');
 const tf = require('@tensorflow/tfjs');
@@ -218,6 +218,7 @@ try {
   Portfolio = require('./models/Portfolio'); // Portfolio holdings
   // Fix: Load PriceHistory model
   PriceHistory = require('./models/MarketData');
+  DemoTrade = require('./models/DemoTrade'); // Register DemoTrade model
   console.log('✅ Models loaded successfully');
 } catch (error) {
   console.error('❌ Error loading models:', error.message);
@@ -407,6 +408,7 @@ const getCoinGeckoId = (symbol) => {
 // Add this helper to save prices to the database
 async function savePricesToDatabase(priceArray) {
   for (const { symbol, price } of priceArray) {
+    addPricePoint(symbol, price); // Ensure in-memory price history is updated
     try {
       await PriceHistory.create({
         symbol,
@@ -439,9 +441,10 @@ const updatePrices = async () => {
       // Convert results object to array of price objects for savePricesToDatabase
       const priceArray = Object.entries(results).map(([symbol, price]) => ({ symbol, price }));
       await savePricesToDatabase(priceArray);
-      console.log(`✅ Updated ${priceArray.length} prices successfully`);
       // Update price histories
       await updatePriceHistories();
+      // Trigger signal generation after price update
+      await generateSignals();
       // Emit to connected clients if io is available
       if (typeof io !== 'undefined') {
         io.emit('priceUpdate', priceArray);
@@ -575,6 +578,7 @@ const updatePriceHistories = async () => {
           });
           
           await priceHistory.save();
+          addPricePoint(asset.symbol, price); // Update in-memory price history
           
           console.log(`✅ ${asset.symbol}: ${price} (${source})`);
           
@@ -601,255 +605,198 @@ const updatePriceHistories = async () => {
 // --- Enhanced signal generation function ---
 
 async function generateSignals() {
-  // Simple check - if MongoDB is not connected, skip silently
-  if (mongoose.connection.readyState !== 1) {
-    console.log('🔌 MongoDB not connected - skipping signal generation');
-    return;
-  }
-
-  console.log('🤖 Starting signal generation...');
-  
-  // Check if we have enough price data (no more waiting loops)
-  let assetsWithSufficientData = 0;
-  
-  for (const asset of assets) {
-    const priceHistory = priceHistories[asset.symbol] || [];
-    if (priceHistory.length >= 20) {
-      assetsWithSufficientData++;
-    }
-  }
-  
-  if (assetsWithSufficientData === 0) {
-    console.log('⚠️ No assets have sufficient price data yet - skipping signal generation');
-    return;
-  }
-  
-  console.log(`📊 Generating signals for ${assetsWithSufficientData}/${assets.length} assets with sufficient data`);
-
-  // Process each asset type with specific logic
-  for (const asset of assets) {
-    try {
-      const priceHistory = priceHistories[asset.symbol] || [];
-      
-      // Skip if insufficient data
-      if (priceHistory.length < 20) {
-        console.log(`⚪ Skipping ${asset.symbol} - only ${priceHistory.length} price points`);
-        continue;
-      }
-      
-      // --- Technical Indicators ---
-      const rsiValues = RSI.calculate({ values: priceHistory, period: 14 });
-      const currentRSI = rsiValues.length ? rsiValues[rsiValues.length - 1] : 50;
-      
-      const macdResults = MACD.calculate({
-        values: priceHistory,
-        fastPeriod: 12,
-        slowPeriod: 26,
-        signalPeriod: 9,
-      });
-      const currentMACD = macdResults.length ? macdResults[macdResults.length - 1].MACD : 0;
-      
-      const smaValues = require('technicalindicators').SMA.calculate({ values: priceHistory, period: 10 });
-      const currentSMA = smaValues.length ? smaValues[smaValues.length - 1] : priceHistory[priceHistory.length - 1];
-      
-      const emaValues = require('technicalindicators').EMA.calculate({ values: priceHistory, period: 10 });
-      const currentEMA = emaValues.length ? emaValues[emaValues.length - 1] : priceHistory[priceHistory.length - 1];
-      
-      // --- Market-specific analysis ---
-      let marketMultiplier = 1;
-      let volatilityFactor = 1;
-      
-      switch (asset.market) {
-        case 'crypto':
-          marketMultiplier = 1.2; // Crypto is more volatile
-          volatilityFactor = 1.5;
-          break;
-        case 'forex':
-          marketMultiplier = 0.8; // Forex is more stable
-          volatilityFactor = 0.7;
-          break;
-        case 'stocks':
-          marketMultiplier = 1.0; // Standard multiplier
-          volatilityFactor = 1.0;
-          break;
-        case 'commodities':
-          marketMultiplier = 1.1; // Commodities have unique patterns
-          volatilityFactor = 1.2;
-          break;
-      }
-      
-      // --- News sentiment (optional) ---
-      let newsSentiment = 0;
+  const now = Date.now();
+  try {
+    for (const asset of assets) {
       try {
-        newsSentiment = await analyzeNewsSentiment(asset.symbol);
-      } catch (err) {
-        newsSentiment = 0;
-      }
-      
-      // --- Enhanced signal logic with market-specific thresholds ---
-      let signalType = 'HOLD';
-      let signalStrength = 0;
-      
-      // RSI signals with market-specific thresholds
-      const rsiOverbought = asset.market === 'crypto' ? 75 : 70;
-      const rsiOversold = asset.market === 'crypto' ? 25 : 30;
-      
-      if (currentRSI > rsiOverbought) signalStrength -= 1.5; // Overbought
-      if (currentRSI < rsiOversold) signalStrength += 1.5; // Oversold
-      
-      // MACD signals
-      if (currentMACD > 0.001) signalStrength += 1.0;
-      if (currentMACD < -0.001) signalStrength -= 1.0;
-      
-      // Moving average signals
-      const maCrossover = (currentEMA - currentSMA) / currentSMA * 100;
-      if (maCrossover > 0.5) signalStrength += 0.8;
-      if (maCrossover < -0.5) signalStrength -= 0.8;
-      
-      // News sentiment factor
-      signalStrength += newsSentiment * 0.3;
-      
-      // Apply market multiplier
-      signalStrength *= marketMultiplier;
-      
-      // Determine signal type based on strength and market
-      const buyThreshold = asset.market === 'crypto' ? 2.0 : 1.5;
-      const sellThreshold = asset.market === 'crypto' ? -2.0 : -1.5;
-      
-      if (signalStrength >= buyThreshold) {
-        signalType = 'BUY';
-      } else if (signalStrength <= sellThreshold) {
-        signalType = 'SELL';
-      }
-      
-      // --- Enhanced confidence calculation ---
-      const rsiConfidence = Math.min(30, Math.abs(currentRSI - 50) * 0.6);
-      const macdConfidence = Math.min(25, Math.abs(currentMACD) * 500);
-      const maConfidence = Math.min(20, Math.abs(maCrossover) * 4);
-      const sentimentConfidence = Math.min(15, Math.abs(newsSentiment) * 30);
-      const strengthConfidence = Math.min(10, Math.abs(signalStrength) * 5);
-      
-      const confidence = Math.round(
-        rsiConfidence + 
-        macdConfidence + 
-        maConfidence + 
-        sentimentConfidence + 
-        strengthConfidence
-      );
-      
-      const livePrice = priceHistory[priceHistory.length - 1];
-      
-      // Market-specific stop loss and target calculation
-      let stopLossPercent, targetPercent;
-      
-      switch (asset.market) {
-        case 'crypto':
-          stopLossPercent = signalType === 'BUY' ? 0.95 : 1.05; // 5% stop loss
-          targetPercent = signalType === 'BUY' ? 1.08 : 0.92; // 8% target
-          break;
-        case 'forex':
-          stopLossPercent = signalType === 'BUY' ? 0.995 : 1.005; // 0.5% stop loss
-          targetPercent = signalType === 'BUY' ? 1.015 : 0.985; // 1.5% target
-          break;
-        case 'stocks':
-          stopLossPercent = signalType === 'BUY' ? 0.98 : 1.02; // 2% stop loss
-          targetPercent = signalType === 'BUY' ? 1.05 : 0.95; // 5% target
-          break;
-        case 'commodities':
-          stopLossPercent = signalType === 'BUY' ? 0.97 : 1.03; // 3% stop loss
-          targetPercent = signalType === 'BUY' ? 1.06 : 0.94; // 6% target
-          break;
-        default:
-          stopLossPercent = signalType === 'BUY' ? 0.98 : 1.02;
-          targetPercent = signalType === 'BUY' ? 1.05 : 0.95;
-      }
-      
-      const stopLoss = livePrice * stopLossPercent;
-      const targetPrice = livePrice * targetPercent;
-      
-      // Only generate signals with reasonable confidence (market-specific thresholds)
-      const minConfidence = asset.market === 'crypto' ? 50 : 60;
-      
-      if (signalType !== 'HOLD' && confidence >= minConfidence) {
-        const signalData = {
-          symbol: asset.symbol,
-          type: signalType,
-          confidence,
-          entryPrice: livePrice,
-          targetPrice,
-          stopLoss,
-          timeframe: '15M',
-          market: asset.market,
-          description: `${signalType} signal for ${asset.market} with ${confidence}% confidence`,
-          reasoning: `RSI=${currentRSI.toFixed(2)}, MACD=${currentMACD.toFixed(4)}, EMA=${currentEMA.toFixed(4)}, SMA=${currentSMA.toFixed(4)}, MA_Cross=${maCrossover.toFixed(2)}%, Sentiment=${newsSentiment.toFixed(2)}, Strength=${signalStrength.toFixed(2)}`,
-          technicalIndicators: { 
-            rsi: currentRSI, 
-            macd: currentMACD, 
-            ema: currentEMA, 
-            sma: currentSMA, 
-            newsSentiment,
-            signalStrength,
-            maCrossover,
-            marketMultiplier,
-            volatilityFactor
-          },
-          status: 'active',
-          createdAt: new Date(),
-          expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-          source: 'enhanced_ai',
-          risk: confidence > 80 ? 'high' : confidence > 65 ? 'medium' : 'low',
-          dataQuality: {
-            pricePoints: priceHistory.length,
-            dataAge: 'recent',
-            marketType: asset.market,
-            confidenceBreakdown: {
-              rsi: rsiConfidence,
-              macd: macdConfidence,
-              ma: maConfidence,
-              sentiment: sentimentConfidence,
-              strength: strengthConfidence
+        // Remove debug logs for price history and timestamps
+        const priceHistoryObjs = (priceHistories[asset.symbol] || []).filter(
+          p => {
+            if (typeof p === 'object' && p.timestamp) {
+              return now - new Date(p.timestamp).getTime() < 24 * 60 * 60 * 1000;
             }
+            return true;
           }
-        };
-        
-        // Remove expired or lower-confidence signals for this asset
-        await Signal.deleteMany({
-          symbol: asset.symbol,
-          $or: [
-            { expiresAt: { $lt: new Date() } },
-            { confidence: { $lt: confidence } }
-          ]
+        );
+        const priceHistory = priceHistoryObjs.map(p => typeof p === 'object' ? p.price : p);
+        if (priceHistory.length < 30) {
+          continue;
+        }
+        // --- Technical Indicators ---
+        const rsiValues = RSI.calculate({ values: priceHistory, period: 14 });
+        const currentRSI = rsiValues.length ? rsiValues[rsiValues.length - 1] : 50;
+        const macdResults = MACD.calculate({
+          values: priceHistory,
+          fastPeriod: 12,
+          slowPeriod: 26,
+          signalPeriod: 9,
         });
-        
-        const newSignal = await Signal.create(signalData);
-        broadcastSignal(newSignal);
-        
-        console.log(`🎯 Generated ${signalType} signal for ${asset.symbol} (${asset.market}) with ${confidence}% confidence`);
-      } else {
-        console.log(`⚪ HOLD signal for ${asset.symbol} (${asset.market}) - confidence: ${confidence}%`);
+        const currentMACD = macdResults.length ? macdResults[macdResults.length - 1].MACD : 0;
+        const smaValues = require('technicalindicators').SMA.calculate({ values: priceHistory, period: 10 });
+        const currentSMA = smaValues.length ? smaValues[smaValues.length - 1] : priceHistory[priceHistory.length - 1];
+        const emaValues = require('technicalindicators').EMA.calculate({ values: priceHistory, period: 10 });
+        const currentEMA = emaValues.length ? emaValues[emaValues.length - 1] : priceHistory[priceHistory.length - 1];
+        const atrValues = ATR.calculate({ high: priceHistory, low: priceHistory, close: priceHistory, period: 14 });
+        const currentATR = atrValues.length ? atrValues[atrValues.length - 1] : 0;
+        const adxValues = ADX.calculate({ close: priceHistory, high: priceHistory, low: priceHistory, period: 14 });
+        const currentADX = adxValues.length ? adxValues[adxValues.length - 1].adx : 0;
+        const stochasticValues = Stochastic.calculate({ high: priceHistory, low: priceHistory, close: priceHistory, period: 14, signalPeriod: 3 });
+        const currentStochastic = stochasticValues.length ? stochasticValues[stochasticValues.length - 1].k : 50;
+        const cciValues = CCI.calculate({ high: priceHistory, low: priceHistory, close: priceHistory, period: 20 });
+        const currentCCI = cciValues.length ? cciValues[cciValues.length - 1] : 0;
+        // --- Trend/Volatility Filters ---
+        const isUptrend = currentEMA > currentSMA && currentADX > 20;
+        const isDowntrend = currentEMA < currentSMA && currentADX > 20;
+        const isHighVolatility = currentATR > (currentSMA * 0.02); // ATR > 2% of SMA
+        // --- Indicator Confluence & Scoring ---
+        let score = 0;
+        if (currentRSI < 30) score += 1;
+        if (currentRSI > 70) score -= 1;
+        if (currentMACD > 0) score += 1;
+        if (currentMACD < 0) score -= 1;
+        if (currentStochastic < 20) score += 0.5;
+        if (currentStochastic > 80) score -= 0.5;
+        if (currentCCI < -100) score += 0.5;
+        if (currentCCI > 100) score -= 0.5;
+        if (isUptrend) score += 1;
+        if (isDowntrend) score -= 1;
+        if (isHighVolatility) score -= 0.5; // Avoid signals in high volatility
+        // --- News sentiment (optional) ---
+        let newsSentiment = 0;
+        try {
+          newsSentiment = await analyzeNewsSentiment(asset.symbol);
+        } catch (err) {
+          newsSentiment = 0;
+        }
+        score += newsSentiment * 0.2;
+        // --- Signal Decision ---
+        let signalType = 'HOLD';
+        if (score >= 2) signalType = 'BUY';
+        else if (score <= -2) signalType = 'SELL';
+        // --- Confidence Calculation ---
+        let confidence = Math.round(Math.min(100, Math.abs(score) * 20 + Math.abs(currentADX) * 0.5 + Math.abs(currentRSI - 50) * 0.5));
+        if (signalType === 'HOLD') confidence = Math.round(confidence * 0.5);
+        // --- Market-specific stop loss and target calculation ---
+        let stopLossPercent, targetPercent;
+        switch (asset.market) {
+          case 'crypto':
+            stopLossPercent = signalType === 'BUY' ? 0.95 : 1.05;
+            targetPercent = signalType === 'BUY' ? 1.08 : 0.92;
+            break;
+          case 'forex':
+            stopLossPercent = signalType === 'BUY' ? 0.995 : 1.005;
+            targetPercent = signalType === 'BUY' ? 1.015 : 0.985;
+            break;
+          case 'stocks':
+            stopLossPercent = signalType === 'BUY' ? 0.98 : 1.02;
+            targetPercent = signalType === 'BUY' ? 1.05 : 0.95;
+            break;
+          case 'commodities':
+            stopLossPercent = signalType === 'BUY' ? 0.97 : 1.03;
+            targetPercent = signalType === 'BUY' ? 1.06 : 0.94;
+            break;
+          default:
+            stopLossPercent = signalType === 'BUY' ? 0.98 : 1.02;
+            targetPercent = signalType === 'BUY' ? 1.05 : 0.95;
+        }
+        const livePrice = priceHistory[priceHistory.length - 1];
+        const stopLoss = livePrice * stopLossPercent;
+        const targetPrice = livePrice * targetPercent;
+        // Only generate signals with reasonable confidence and score
+        const minConfidence = asset.market === 'crypto' ? 50 : 60;
+        if (signalType !== 'HOLD' && confidence >= minConfidence && Math.abs(score) >= 2) {
+          const signalData = {
+            symbol: asset.symbol,
+            type: signalType,
+            confidence,
+            entryPrice: livePrice,
+            targetPrice,
+            stopLoss,
+            timeframe: '15M',
+            market: asset.market,
+            description: `${signalType} signal for ${asset.market} with ${confidence}% confidence`,
+            reasoning: `RSI=${currentRSI.toFixed(2)}, MACD=${currentMACD.toFixed(4)}, EMA=${currentEMA.toFixed(4)}, SMA=${currentSMA.toFixed(4)}, ATR=${currentATR.toFixed(4)}, ADX=${currentADX.toFixed(2)}, Stoch=${currentStochastic.toFixed(2)}, CCI=${currentCCI.toFixed(2)}, Score=${score.toFixed(2)}, Sentiment=${newsSentiment.toFixed(2)}`,
+            technicalIndicators: {
+              rsi: currentRSI,
+              macd: currentMACD,
+              ema: currentEMA,
+              sma: currentSMA,
+              atr: currentATR,
+              adx: currentADX,
+              stochastic: currentStochastic,
+              cci: currentCCI,
+              newsSentiment,
+              score
+            },
+            status: 'active',
+            createdAt: new Date(),
+            expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+            source: 'unified_ai',
+            risk: confidence > 80 ? 'high' : confidence > 65 ? 'medium' : 'low',
+            dataQuality: {
+              pricePoints: priceHistory.length,
+              dataAge: 'recent',
+              marketType: asset.market,
+              confidenceBreakdown: {
+                rsi: Math.abs(currentRSI - 50),
+                macd: Math.abs(currentMACD),
+                adx: Math.abs(currentADX),
+                score: Math.abs(score)
+              }
+            }
+          };
+          await Signal.deleteMany({
+            symbol: asset.symbol,
+            $or: [
+              { expiresAt: { $lt: new Date() } },
+              { confidence: { $lt: confidence } }
+            ]
+          });
+          const newSignal = await Signal.create(signalData);
+          if (typeof broadcastSignal === 'function') {
+            broadcastSignal(newSignal);
+          }
+          console.log(`🎯 Generated ${signalType} signal for ${asset.symbol} (${asset.market}) with ${confidence}% confidence`);
+        }
+      } catch (error) {
+        console.error(`❌ Error processing ${asset.symbol}:`, error.message);
       }
-    } catch (error) {
-      console.error(`❌ Error processing ${asset.symbol}:`, error.message);
     }
+  } catch (err) {
+    console.error('DEBUG: Error in asset loop:', err);
   }
-  
-  return null;
+  await Signal.updateMany({ expiresAt: { $lt: new Date() }, status: 'active' }, { status: 'inactive' });
 }
 
 // Now set up the intervals AFTER the functions are defined
-console.log('⏰ Setting up intervals...');
+// After models are loaded and before intervals/startup calls
+async function bootstrapPriceHistories() {
+  for (const asset of assets) {
+    try {
+      const docs = await PriceHistory.find({ symbol: asset.symbol })
+        .sort({ timestamp: -1 })
+        .limit(30)
+        .lean();
+      priceHistories[asset.symbol] = docs.reverse().map(doc => ({ price: doc.price, timestamp: doc.timestamp }));
+      console.log(`Bootstrapped ${asset.symbol} with ${priceHistories[asset.symbol].length} price points`);
+    } catch (err) {
+      console.error(`Error bootstrapping ${asset.symbol}:`, err.message);
+    }
+  }
+}
 
-// Start price updates every 5 minutes (development)
-setInterval(updatePrices, 30 * 1000); // every 30 seconds
-
-// Start signal generation every 2 minutes  
-signalGenerationInterval = setInterval(generateSignals, 2 * 60 * 1000);
-
-// Initial calls
-console.log('🚀 Starting initial updates...');
-updatePrices();
-updatePriceHistories();
-setTimeout(generateSignals, 5000); // Wait 5 seconds before first signal generation
+// Call bootstrapPriceHistories before starting intervals and updates
+(async () => {
+  await bootstrapPriceHistories();
+  // Now start intervals and initial updates
+  console.log('⏰ Setting up intervals...');
+  setInterval(updatePrices, 30 * 1000); // every 30 seconds
+  signalGenerationInterval = setInterval(generateSignals, 2 * 60 * 1000);
+  console.log('🚀 Starting initial updates...');
+  updatePrices();
+  updatePriceHistories();
+  setTimeout(generateSignals, 5000);
+})();
 
 
 // --- Market Data Endpoint & Update ---
@@ -1012,7 +959,16 @@ function broadcastSignal(signal) {
 }
 
 // --- In-memory price history store ---
-const priceHistories = {}; // { [symbol]: number[] }
+const priceHistories = {}; // { [symbol]: [{price, timestamp}] }
+
+// Helper to add a price point to in-memory history
+function addPricePoint(symbol, price) {
+  if (!priceHistories[symbol]) priceHistories[symbol] = [];
+  priceHistories[symbol].push({ price, timestamp: new Date() });
+  // Purge price points older than 24 hours
+  const now = Date.now();
+  priceHistories[symbol] = priceHistories[symbol].filter(p => now - new Date(p.timestamp).getTime() < 24 * 60 * 60 * 1000);
+}
 
 // --- Helper: Fetch latest price for each asset type ---
 async function fetchLatestPrice(symbol, market) {
