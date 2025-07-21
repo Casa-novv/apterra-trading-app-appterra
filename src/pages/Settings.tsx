@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import debounce from 'lodash/debounce';
+import { useThemeSwitcher } from '../theme/ThemeContext';
+import autoTradeService, { AutoTradeCriteria } from '../services/autoTradeService';
 import {
   Container,
   Paper,
@@ -82,16 +84,10 @@ const TabPanel: React.FC<TabPanelProps> = ({ children, value, index, ...other })
   </div>
 );
 
-const themeOptions = [
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-  { value: 'colorful', label: 'Colorful' },
-];
-
 const Settings: React.FC = () => {
   const theme = useTheme();
   const { user } = useSelector((state: any) => state.auth);
-  // const { user } = useUserSelector((state: any) => state.auth);
+  const { theme: currentTheme, setTheme, availableThemes } = useThemeSwitcher();
   const [activeTab, setActiveTab] = useState(0);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -615,12 +611,22 @@ const Settings: React.FC = () => {
               <FormControl fullWidth>
                 <InputLabel>Theme</InputLabel>
                 <Select
-                  value={selectedTheme}
+                  value={currentTheme}
                   label="Theme"
-                  onChange={handleThemeChange}
+                  onChange={(e) => {
+                    setTheme(e.target.value as any);
+                    setSettingsChanged(true);
+                  }}
                 >
-                  {themeOptions.map(opt => (
-                    <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                  {availableThemes.map(theme => (
+                    <MenuItem key={theme.value} value={theme.value}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography>{theme.label}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {theme.description}
+                        </Typography>
+                      </Box>
+                    </MenuItem>
                   ))}
                 </Select>
               </FormControl>
@@ -913,6 +919,7 @@ const Settings: React.FC = () => {
                     Automation Settings
                   </Typography>
                   
+                  {/* Auto-Trade Status */}
                   <Box p={2} sx={{ background: alpha(accent, 0.1), borderRadius: 2, mb: 2 }}>
                     <Box display="flex" justifyContent="space-between" alignItems="center">
                       <Box>
@@ -922,12 +929,14 @@ const Settings: React.FC = () => {
                         </Typography>
                       </Box>
                       <Switch
-                        checked={tradingSettings.autoTrading}
+                        checked={autoTradeService.getCriteria().enabled}
                         onChange={(e) => {
-                          setTradingSettings(prev => ({
-                            ...prev,
-                            autoTrading: e.target.checked
-                          }));
+                          autoTradeService.updateCriteria({ enabled: e.target.checked });
+                          if (e.target.checked) {
+                            autoTradeService.start();
+                          } else {
+                            autoTradeService.stop();
+                          }
                           setSettingsChanged(true);
                         }}
                         sx={{
@@ -938,9 +947,111 @@ const Settings: React.FC = () => {
                     </Box>
                   </Box>
 
-                  {tradingSettings.autoTrading && (
-                    <Alert severity="warning" sx={{ mb: 2 }}>
-                      <strong>Auto Trading Enabled:</strong> Trades will be executed automatically based on your settings.
+                  {/* Auto-Trade Stats */}
+                  {autoTradeService.getCriteria().enabled && (
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom>Auto-Trade Statistics</Typography>
+                      <Grid container spacing={2}>
+                        <Grid size={{ xs: 6, md: 3 }}>
+                          <Box textAlign="center" p={1} sx={{ background: alpha(theme.palette.success.main, 0.1), borderRadius: 1 }}>
+                            <Typography variant="h6" color="success.main">
+                              {autoTradeService.getStats().totalTrades}
+                            </Typography>
+                            <Typography variant="caption">Total Trades</Typography>
+                          </Box>
+                        </Grid>
+                        <Grid size={{ xs: 6, md: 3 }}>
+                          <Box textAlign="center" p={1} sx={{ background: alpha(theme.palette.info.main, 0.1), borderRadius: 1 }}>
+                            <Typography variant="h6" color="info.main">
+                              {autoTradeService.getWinRate().toFixed(1)}%
+                            </Typography>
+                            <Typography variant="caption">Win Rate</Typography>
+                          </Box>
+                        </Grid>
+                        <Grid size={{ xs: 6, md: 3 }}>
+                          <Box textAlign="center" p={1} sx={{ background: alpha(theme.palette.warning.main, 0.1), borderRadius: 1 }}>
+                            <Typography variant="h6" color="warning.main">
+                              {autoTradeService.getStats().tradesToday}
+                            </Typography>
+                            <Typography variant="caption">Today's Trades</Typography>
+                          </Box>
+                        </Grid>
+                        <Grid size={{ xs: 6, md: 3 }}>
+                          <Box textAlign="center" p={1} sx={{ background: alpha(theme.palette.primary.main, 0.1), borderRadius: 1 }}>
+                            <Typography variant="h6" color="primary.main">
+                              ${autoTradeService.getStats().totalPnL.toFixed(2)}
+                            </Typography>
+                            <Typography variant="caption">Total P&L</Typography>
+                          </Box>
+                        </Grid>
+                      </Grid>
+                    </Box>
+                  )}
+
+                  {/* Auto-Trade Configuration */}
+                  {autoTradeService.getCriteria().enabled && (
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom>Auto-Trade Configuration</Typography>
+                      <Grid container spacing={2}>
+                        <Grid size={{ xs: 12, md: 6 }}>
+                          <TextField
+                            fullWidth
+                            label="Min Confidence (%)"
+                            type="number"
+                            value={autoTradeService.getCriteria().minConfidence}
+                            onChange={(e) => autoTradeService.updateCriteria({ 
+                              minConfidence: parseInt(e.target.value) || 75 
+                            })}
+                            size="small"
+                            InputProps={{ endAdornment: '%' }}
+                          />
+                        </Grid>
+                        <Grid size={{ xs: 12, md: 6 }}>
+                          <TextField
+                            fullWidth
+                            label="Position Size (%)"
+                            type="number"
+                            value={autoTradeService.getCriteria().positionSize}
+                            onChange={(e) => autoTradeService.updateCriteria({ 
+                              positionSize: parseFloat(e.target.value) || 5 
+                            })}
+                            size="small"
+                            InputProps={{ endAdornment: '%' }}
+                          />
+                        </Grid>
+                        <Grid size={{ xs: 12, md: 6 }}>
+                          <TextField
+                            fullWidth
+                            label="Max Positions"
+                            type="number"
+                            value={autoTradeService.getCriteria().maxPositions}
+                            onChange={(e) => autoTradeService.updateCriteria({ 
+                              maxPositions: parseInt(e.target.value) || 5 
+                            })}
+                            size="small"
+                          />
+                        </Grid>
+                        <Grid size={{ xs: 12, md: 6 }}>
+                          <TextField
+                            fullWidth
+                            label="Max Daily Trades"
+                            type="number"
+                            value={autoTradeService.getCriteria().maxDailyTrades}
+                            onChange={(e) => autoTradeService.updateCriteria({ 
+                              maxDailyTrades: parseInt(e.target.value) || 10 
+                            })}
+                            size="small"
+                          />
+                        </Grid>
+                      </Grid>
+                    </Box>
+                  )}
+
+                  {autoTradeService.getCriteria().enabled && (
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                      <strong>Auto-Trade Active:</strong> System is monitoring signals and executing trades automatically.
+                      <br />
+                      <strong>Status:</strong> {autoTradeService.isRunning() ? '🟢 Running' : '🔴 Stopped'}
                     </Alert>
                   )}
                 </CardContent>

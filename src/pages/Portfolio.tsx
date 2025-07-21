@@ -25,6 +25,9 @@ import {
   useTheme,
   Alert,
   Snackbar,
+  Badge,
+  Tooltip,
+  Divider,
 } from '@mui/material';
 import {
   TrendingUp,
@@ -35,11 +38,31 @@ import {
   ShowChart,
   Assessment,
   Timeline,
+  Warning,
+  CheckCircle,
+  Error,
+  Info,
+  AutoAwesome,
+  Speed,
+  Psychology,
 } from '@mui/icons-material';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import type { GridColDef } from '@mui/x-data-grid';
 import { DataGrid, GridToolbar } from '@mui/x-data-grid';
 import { DebugPanel } from '../components/DebugPanel';
+import { 
+  fetchPortfolio, 
+  createDemoAccount, 
+  resetDemoAccount,
+  closeDemoPosition,
+  closeAllDemoPositions,
+  selectPortfolioStats,
+  selectPositionsNearTakeProfit,
+  selectPositionsNearStopLoss,
+  selectPortfolioNotifications,
+  clearNotifications,
+} from '../store/slices/portfolioSlice';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 const safeCurrency = (value: number | string | undefined | null): string => {
   const numValue = Number(value);
@@ -69,7 +92,7 @@ const safePercentage = (value: number | string | undefined | null): string => {
 
 const ORIGINAL_BALANCE = 100000;
 
-// --- Recommendation: Move price fetchers to a utility file for production ---
+// Enhanced price fetching with better error handling
 const fetchMultiMarketPrices = async (positions: any[]) => {
   const prices: Record<string, number> = {};
   console.log('🔄 Starting price fetch for', positions.length, 'positions');
@@ -81,9 +104,9 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
   
   console.log('💰 Crypto symbols to fetch:', cryptoSymbols);
 
-  // --- Crypto (Direct API call) ---
+  // Fetch crypto prices
   for (const symbol of cryptoSymbols) {
-    if (!symbol) continue; // Skip if symbol is undefined
+    if (!symbol) continue;
     
     try {
       console.log(`📈 Fetching ${symbol} from backend...`);
@@ -118,10 +141,17 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
 
   console.log('📊 Final prices object:', prices);
   return prices;
-};const Portfolio: React.FC = () => {
+};
+
+const Portfolio: React.FC = () => {
   const theme = useTheme();
   const dispatch = useAppDispatch();
   const { positions = [], loading, error } = useAppSelector((state: any) => state.portfolio || {});
+  const portfolioStats = useAppSelector(selectPortfolioStats);
+  const positionsNearTakeProfit = useAppSelector(selectPositionsNearTakeProfit);
+  const positionsNearStopLoss = useAppSelector(selectPositionsNearStopLoss);
+  const notifications = useAppSelector(selectPortfolioNotifications);
+  
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<any>(null);
   const [newPosition, setNewPosition] = useState({
@@ -137,18 +167,33 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
   const [accountError, setAccountError] = useState('');
   const [accountSuccess, setAccountSuccess] = useState('');
   const [realizedPnLPeriod, setRealizedPnLPeriod] = useState('30d');
+  const [showNotifications, setShowNotifications] = useState(true);
 
-  // --- Recommendation: Use your actual user ID logic here ---
+  // WebSocket connection for real-time updates
+  const { isConnected: wsConnected } = useWebSocket({
+    onPortfolioUpdate: (data) => {
+      console.log('💰 Portfolio update received:', data);
+      // Portfolio updates are handled automatically via Redux
+    },
+  });
+
+  // User ID from auth state
   const userId = useAppSelector((state: any) => state.auth.user?._id || state.auth.user?.id);
 
   // Fetch account on mount
   useEffect(() => {
     if (userId) {
-      axios.get(`/api/demo-account/${userId}`)
-        .then(res => setDemoAccount(res.data))
-        .catch(() => setShowPrompt(true));
+      dispatch(fetchPortfolio(userId))
+        .unwrap()
+        .then((data) => {
+          setDemoAccount(data);
+          setShowPrompt(false);
+        })
+        .catch(() => {
+          setShowPrompt(true);
+        });
     }
-  }, [userId]);
+  }, [userId, dispatch]);
 
   // Enhanced price update effect with better error handling
   useEffect(() => {
@@ -171,13 +216,25 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
     };
     
     updatePrices();
-    const interval = setInterval(updatePrices, 30000);
+    const interval = setInterval(updatePrices, 30000); // Update every 30 seconds
     return () => clearInterval(interval);
   }, [demoAccount?.openPositions?.length]);
+
+  // Auto-hide notifications after 5 seconds
+  useEffect(() => {
+    if (notifications.positionClosed || notifications.takeProfitHit || notifications.stopLossHit) {
+      const timer = setTimeout(() => {
+        dispatch(clearNotifications());
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [notifications, dispatch]);
+
   // Prepare open positions with P&L
   const validOpenPositions = (demoAccount?.openPositions || []).filter(
     (pos: any) => pos && typeof pos === 'object' && (pos._id || pos.id)
   );
+  
   const gridOpenPositionsWithPnL = validOpenPositions.map((pos: any) => {
     const entry = Number(pos.entryPrice) || 0;
     const current = Number(pos.currentPrice ?? pos.entryPrice) || 0;
@@ -194,6 +251,10 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
     const invested = entry * qty;
     const pnlPercentage = invested !== 0 ? (pnl / invested) * 100 : 0;
     
+    // Check if position is near take profit or stop loss
+    const nearTakeProfit = pos.targetPrice && Math.abs(current - pos.targetPrice) / entry <= 0.02;
+    const nearStopLoss = pos.stopLoss && Math.abs(current - pos.stopLoss) / entry <= 0.02;
+    
     console.log(`Calculating P&L for ${pos.symbol}:`, {
       entry,
       current,
@@ -201,7 +262,9 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
       type,
       pnl,
       pnlPercentage,
-      invested
+      invested,
+      nearTakeProfit,
+      nearStopLoss
     });
     
     return {
@@ -210,8 +273,10 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
       type,
       market: pos.market || 'crypto',
       currentPrice: current,
-      pnl: Number(pnl.toFixed(2)), // Ensure it's a proper number
+      pnl: Number(pnl.toFixed(2)),
       pnlPercentage: Number(pnlPercentage.toFixed(2)),
+      nearTakeProfit,
+      nearStopLoss,
     };
   });
 
@@ -237,6 +302,7 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
     });
     setOpenDialog(true);
   };
+
   const handleEditPosition = (position: any) => {
     setSelectedPosition(position);
     setNewPosition({
@@ -248,398 +314,406 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
     });
     setOpenDialog(true);
   };
-  const handleCloseDialog = () => {
-    setOpenDialog(false);
-    setSelectedPosition(null);
-  };
+
   const handleSavePosition = async () => {
+    if (!userId) return;
+    
+    setAccountActionLoading(true);
+    setAccountError('');
+    
     try {
-      const payload = {
-        symbol: newPosition.symbol,
-        quantity: Number(newPosition.quantity),
-        entryPrice: Number(newPosition.entryPrice),
-        currentPrice: Number(newPosition.entryPrice), // Set initial current price
-        type: newPosition.type,
-        market: newPosition.market || 'crypto', // Ensure market is set
-      };
-      
-      console.log('💾 Saving position with payload:', payload);
-      
-      if (!selectedPosition) {
-        const res = await axios.post(`/api/demo-account/${userId}/positions`, payload);
-        setDemoAccount(res.data);
-        setAccountSuccess('Position added successfully!');
+      if (selectedPosition) {
+        // Edit existing position logic here
+        console.log('Editing position:', selectedPosition);
       } else {
-        // Handle edit/update here if needed
+        // Add new position
+        const positionData = {
+          symbol: newPosition.symbol,
+          direction: newPosition.type,
+          quantity: Number(newPosition.quantity),
+          entryPrice: Number(newPosition.entryPrice),
+          market: newPosition.market,
+        };
+        
+        await axios.post(`/api/demo-account/${userId}/positions`, positionData);
+        setAccountSuccess('Position added successfully!');
       }
-      handleCloseDialog();
-    } catch (error) {
-      console.error('❌ Error saving position:', error);
-      setAccountError('Failed to save position.');
+      
+      setOpenDialog(false);
+      dispatch(fetchPortfolio(userId));
+    } catch (err: any) {
+      setAccountError(err.response?.data?.message || 'Failed to save position');
     }
+    
+    setAccountActionLoading(false);
   };
+
   const handleClosePosition = async (positionId: string) => {
+    if (!userId) return;
+    
     try {
-      await axios.patch(`/api/demo-account/${userId}/positions/${positionId}/close`);
-      const res = await axios.get(`/api/demo-account/${userId}`);
-      setDemoAccount(res.data);
+      await dispatch(closeDemoPosition({ userId, positionId })).unwrap();
       setAccountSuccess('Position closed successfully!');
-    } catch {
-      setAccountError('Failed to close position.');
+    } catch (err: any) {
+      setAccountError(err.message || 'Failed to close position');
     }
   };
+
   const handleCloseAllPositions = async () => {
+    if (!userId) return;
+    
     try {
-      // Send current prices to backend
-      const positionsWithPrices = openPositions.map((pos: Position) => ({
-        id: pos.id,
-        currentPrice: pos.currentPrice
-      }));
-      
-      await axios.patch(`/api/demo-account/${userId}/positions/close-all`, {
-        positions: positionsWithPrices
-      });
-      
-      const res = await axios.get(`/api/demo-account/${userId}`);
-      setDemoAccount(res.data);
+      await dispatch(closeAllDemoPositions(userId)).unwrap();
       setAccountSuccess('All positions closed successfully!');
-    } catch {
-      setAccountError('Failed to close all positions.');
+    } catch (err: any) {
+      setAccountError(err.message || 'Failed to close all positions');
     }
   };
 
-  // Stats
-  const openPositions = gridOpenPositionsWithPnL;
-  interface Position {
-    id?: string;
-    _id?: string;
-    symbol: string;
-    type: 'BUY' | 'SELL';
-    quantity: number;
-    entryPrice: number;
-    currentPrice?: number;
-    market: 'crypto' | 'forex' | 'stocks' | 'commodities';
-    pnl?: number;
-    pnlPercentage?: number;
-    direction?: 'BUY' | 'SELL';
-    [key: string]: any;
-  }
-
-  interface DemoAccount {
-    balance: number;
-    openPositions: Position[];
-    tradeHistory: Position[];
-    [key: string]: any;
-  }
-
-  // Update your stats calculations
-  const totalPnL = openPositions.reduce((sum: number, pos: Position) => sum + (pos.pnl ?? 0), 0);
-  const totalValue = safeNumber(demoAccount?.balance) + totalPnL;
-  const totalOpenPositionsValue = openPositions.reduce((sum: number, pos: Position) => sum + (pos.currentPrice ?? pos.entryPrice) * pos.quantity, 0);
-  const totalInvested = openPositions.reduce((sum: number, pos: Position) => sum + (pos.quantity * pos.entryPrice), 0);
-
-  // Calculate the dynamic portfolio balance
-  const currentBalance = demoAccount ? Number(demoAccount.balance) : 0;
-  const portfolioValue = currentBalance + totalPnL; // Base balance + unrealized P&L
-
-  const totalReturn = currentBalance > 0 ? (totalPnL / currentBalance) * 100 : 0;
-  const totalClosed = closedPositions.length;
-  const totalWins = closedPositions.filter((pos: any) => (pos.pnl ?? pos.profit ?? 0) > 0).length;
-  const successRate = totalClosed > 0 ? (totalWins / totalClosed) * 100 : 0;
-
-  const portfolioStats = {
-    balance: safeNumber(demoAccount?.balance,),
-    totalPnL: safeNumber(demoAccount?.openPositions?.reduce((sum: number, pos: any) => {
-      // ... existing code
-    }, 0), ),
-    openPositions: safeNumber(demoAccount?.openPositions?.length),
-    closedPositions: safeNumber(demoAccount?.tradeHistory?.length),
-    totalWins: safeNumber(demoAccount?.tradeHistory?.filter((pos: any) => Number(pos.pnl) > 0).length),
-    totalLosses: safeNumber(demoAccount?.tradeHistory?.filter((pos: any) => Number(pos.pnl) <= 0).length),
-    todaysPnL: 0,
-    largestWin: safeNumber(Math.max(...(demoAccount?.tradeHistory?.map((pos: any) => safeNumber(pos.pnl)) || [0]))),
-    largestLoss: safeNumber(Math.min(...(demoAccount?.tradeHistory?.map((pos: any) => safeNumber(pos.pnl)) || [0]))),
-    avgWinAmount: 0,
-    avgLossAmount: 0,
-    profitFactor: 1,
-    totalReturnPercentage: 0, // <-- Add this line
-    successRate: 0,           // <-- Add this line if used below
+  const handleCreateAccount = async () => {
+    if (!userId) return;
+    
+    setAccountActionLoading(true);
+    setAccountError('');
+    
+    try {
+      await dispatch(createDemoAccount(userId)).unwrap();
+      setAccountSuccess('Demo account created successfully!');
+      setShowPrompt(false);
+      dispatch(fetchPortfolio(userId));
+    } catch (err: any) {
+      setAccountError(err.message || 'Failed to create demo account');
+    }
+    
+    setAccountActionLoading(false);
   };
 
-  // Calculate derived stats safely
-  portfolioStats.totalReturnPercentage = Number(portfolioStats.balance) > 0 
-    ? (Number(portfolioStats.totalPnL) / Number(portfolioStats.balance)) * 100 
-    : 0;
+  const handleResetAccount = async () => {
+    if (!userId) return;
+    
+    setAccountActionLoading(true);
+    setAccountError('');
+    
+    try {
+      await dispatch(resetDemoAccount({ userId, balance: ORIGINAL_BALANCE })).unwrap();
+      setAccountSuccess('Account reset successfully!');
+      dispatch(fetchPortfolio(userId));
+    } catch (err: any) {
+      setAccountError(err.message || 'Failed to reset account');
+    }
+    
+    setAccountActionLoading(false);
+  };
 
-  portfolioStats.successRate = Number(portfolioStats.closedPositions) > 0 
-    ? (Number(portfolioStats.totalWins) / Number(portfolioStats.closedPositions)) * 100 
-    : 0;
+  // Position monitoring alerts
+  const getPositionAlert = () => {
+    if (positionsNearTakeProfit.length > 0) {
+      return {
+        type: 'warning' as const,
+        message: `${positionsNearTakeProfit.length} position(s) near take profit`,
+        icon: <CheckCircle />,
+      };
+    }
+    
+    if (positionsNearStopLoss.length > 0) {
+      return {
+        type: 'error' as const,
+        message: `${positionsNearStopLoss.length} position(s) near stop loss`,
+        icon: <Warning />,
+      };
+    }
+    
+    return null;
+  };
 
-  // Stats Card Component
+  const positionAlert = getPositionAlert();
+
+  // Data Grid columns for open positions
+  const openPositionColumns: GridColDef[] = [
+    {
+      field: 'symbol',
+      headerName: 'Symbol',
+      width: 120,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography variant="body2" fontWeight="bold">
+            {params.value}
+          </Typography>
+          {params.row.source === 'enterprise_ml' && (
+            <Tooltip title="Enterprise ML Signal">
+              <AutoAwesome fontSize="small" color="primary" />
+            </Tooltip>
+          )}
+        </Box>
+      ),
+    },
+    {
+      field: 'type',
+      headerName: 'Type',
+      width: 100,
+      renderCell: (params) => (
+        <Chip
+          label={params.value}
+          size="small"
+          color={params.value === 'BUY' ? 'success' : 'error'}
+          icon={params.value === 'BUY' ? <TrendingUp /> : <TrendingDown />}
+        />
+      ),
+    },
+    {
+      field: 'quantity',
+      headerName: 'Quantity',
+      width: 100,
+      type: 'number',
+    },
+    {
+      field: 'entryPrice',
+      headerName: 'Entry Price',
+      width: 120,
+      type: 'number',
+      valueFormatter: (params) => safeCurrency(params.value),
+    },
+    {
+      field: 'currentPrice',
+      headerName: 'Current Price',
+      width: 130,
+      type: 'number',
+      valueFormatter: (params) => safeCurrency(params.value),
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography variant="body2">
+            {safeCurrency(params.value)}
+          </Typography>
+          {params.row.nearTakeProfit && (
+            <Tooltip title="Near Take Profit">
+              <CheckCircle fontSize="small" color="success" />
+            </Tooltip>
+          )}
+          {params.row.nearStopLoss && (
+            <Tooltip title="Near Stop Loss">
+              <Warning fontSize="small" color="error" />
+            </Tooltip>
+          )}
+        </Box>
+      ),
+    },
+    {
+      field: 'targetPrice',
+      headerName: 'Target',
+      width: 100,
+      type: 'number',
+      valueFormatter: (params) => safeCurrency(params.value),
+    },
+    {
+      field: 'stopLoss',
+      headerName: 'Stop Loss',
+      width: 110,
+      type: 'number',
+      valueFormatter: (params) => safeCurrency(params.value),
+    },
+    {
+      field: 'pnl',
+      headerName: 'P&L',
+      width: 120,
+      type: 'number',
+      valueFormatter: (params) => safeCurrency(params.value),
+      renderCell: (params) => (
+        <Typography
+          variant="body2"
+          color={params.value >= 0 ? 'success.main' : 'error.main'}
+          fontWeight="bold"
+        >
+          {safeCurrency(params.value)}
+        </Typography>
+      ),
+    },
+    {
+      field: 'pnlPercentage',
+      headerName: 'P&L %',
+      width: 100,
+      type: 'number',
+      valueFormatter: (params) => safePercentage(params.value),
+      renderCell: (params) => (
+        <Typography
+          variant="body2"
+          color={params.value >= 0 ? 'success.main' : 'error.main'}
+        >
+          {safePercentage(params.value)}
+        </Typography>
+      ),
+    },
+    {
+      field: 'market',
+      headerName: 'Market',
+      width: 100,
+      renderCell: (params) => (
+        <Chip label={params.value} size="small" variant="outlined" />
+      ),
+    },
+    {
+      field: 'actions',
+      headerName: 'Actions',
+      width: 120,
+      sortable: false,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <Tooltip title="Edit Position">
+            <IconButton
+              size="small"
+              onClick={() => handleEditPosition(params.row)}
+            >
+              <Edit fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Close Position">
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => handleClosePosition(params.row.id)}
+            >
+              <RestartAltIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      ),
+    },
+  ];
+
+  // Data Grid columns for closed positions
+  const closedPositionColumns: GridColDef[] = [
+    {
+      field: 'symbol',
+      headerName: 'Symbol',
+      width: 120,
+    },
+    {
+      field: 'type',
+      headerName: 'Type',
+      width: 100,
+      renderCell: (params) => (
+        <Chip
+          label={params.value}
+          size="small"
+          color={params.value === 'BUY' ? 'success' : 'error'}
+        />
+      ),
+    },
+    {
+      field: 'quantity',
+      headerName: 'Quantity',
+      width: 100,
+      type: 'number',
+    },
+    {
+      field: 'entryPrice',
+      headerName: 'Entry Price',
+      width: 120,
+      type: 'number',
+      valueFormatter: (params) => safeCurrency(params.value),
+    },
+    {
+      field: 'currentPrice',
+      headerName: 'Exit Price',
+      width: 120,
+      type: 'number',
+      valueFormatter: (params) => safeCurrency(params.value),
+    },
+    {
+      field: 'pnl',
+      headerName: 'P&L',
+      width: 120,
+      type: 'number',
+      valueFormatter: (params) => safeCurrency(params.value),
+      renderCell: (params) => (
+        <Typography
+          variant="body2"
+          color={params.value >= 0 ? 'success.main' : 'error.main'}
+          fontWeight="bold"
+        >
+          {safeCurrency(params.value)}
+        </Typography>
+      ),
+    },
+    {
+      field: 'closureType',
+      headerName: 'Closure',
+      width: 120,
+      renderCell: (params) => {
+        if (!params.value) return <Chip label="Manual" size="small" />;
+        
+        const isTakeProfit = params.value === 'take_profit_hit';
+        return (
+          <Chip
+            label={isTakeProfit ? 'Take Profit' : 'Stop Loss'}
+            size="small"
+            color={isTakeProfit ? 'success' : 'error'}
+            icon={isTakeProfit ? <CheckCircle /> : <Warning />}
+          />
+        );
+      },
+    },
+    {
+      field: 'openedAt',
+      headerName: 'Opened',
+      width: 150,
+      valueFormatter: (params) => new Date(params.value).toLocaleDateString(),
+    },
+    {
+      field: 'closedAt',
+      headerName: 'Closed',
+      width: 150,
+      valueFormatter: (params) => new Date(params.value).toLocaleDateString(),
+    },
+  ];
+
+  // Stat Card Component
   const StatCard: React.FC<{
     title: string;
     value: string;
     change?: string;
     changeType?: 'positive' | 'negative';
     icon: React.ReactNode;
-  }> = ({ title, value, change, changeType, icon }) => (
-    <Card
-      sx={{
-        background: theme.palette.background.paper,
-        backdropFilter: 'blur(10px)',
-        border: `1px solid ${theme.palette.divider}`,
-        transition: 'transform 0.3s ease',
-        '&:hover': {
-          transform: 'translateY(-4px)',
-        },
-      }}
-    >
+    color?: string;
+  }> = ({ title, value, change, changeType, icon, color = 'primary' }) => (
+    <Card sx={{ height: '100%', position: 'relative', overflow: 'visible' }}>
       <CardContent>
-        <Box display="flex" alignItems="center" justifyContent="space-between">
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <Box>
-            <Typography color="text.secondary" gutterBottom variant="body2">
+            <Typography variant="body2" color="text.secondary" gutterBottom>
               {title}
             </Typography>
-            <Typography variant="h4" component="div" sx={{ fontWeight: 'bold' }}>
+            <Typography variant="h4" component="div" sx={{ fontWeight: 'bold', color: `${color}.main` }}>
               {value}
             </Typography>
             {change && (
-              <Box display="flex" alignItems="center" mt={1}>
-                {changeType === 'positive' ? (
-                  <TrendingUp sx={{ color: theme.palette.success.main, fontSize: 16, mr: 0.5 }} />
-                ) : (
-                  <TrendingDown sx={{ color: theme.palette.error.main, fontSize: 16, mr: 0.5 }} />
-                )}
-                <Typography variant="caption" sx={{ color: changeType === 'positive' ? theme.palette.success.main : theme.palette.error.main }}>
-                  {change}
-                </Typography>
-              </Box>
+              <Typography
+                variant="body2"
+                color={changeType === 'positive' ? 'success.main' : 'error.main'}
+                sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}
+              >
+                {changeType === 'positive' ? '↗' : '↘'} {change}
+              </Typography>
             )}
           </Box>
-          <Box sx={{ color: theme.palette.primary.main, opacity: 0.7 }}>{icon}</Box>
+          <Box
+            sx={{
+              p: 1,
+              borderRadius: 2,
+              bgcolor: `${color}.main`,
+              color: 'white',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {icon}
+          </Box>
         </Box>
       </CardContent>
     </Card>
   );
 
-  // Calculate realizedPnLData for TradingRecommendations and RealizedPnLCard
-  const realizedPnLData = React.useMemo(() => {
-    const trades = demoAccount?.tradeHistory || [];
-    const totalTrades = trades.length;
-    const wins = trades.filter((t: any) => (t.pnl ?? t.profit ?? 0) > 0);
-    const losses = trades.filter((t: any) => (t.pnl ?? t.profit ?? 0) < 0);
-    const winRate = totalTrades > 0 ? (wins.length / totalTrades) * 100 : 0;
-    const totalWin = wins.reduce((sum: number, t: any) => sum + (t.pnl ?? t.profit ?? 0), 0);
-    const totalLoss = losses.reduce((sum: number, t: any) => sum + Math.abs(t.pnl ?? t.profit ?? 0), 0);
-    const profitFactor = totalLoss > 0 ? totalWin / totalLoss : totalWin > 0 ? 999 : 0;
-    const avgWin = wins.length > 0 ? totalWin / wins.length : 0;
-    const avgLoss = losses.length > 0 ? losses.reduce((sum: number, t: any) => sum + (t.pnl ?? t.profit ?? 0), 0) / losses.length : 0;
-    const totalPnL = trades.reduce((sum: number, t: any) => sum + (t.pnl ?? t.profit ?? 0), 0);
-    return {
-      winRate,
-      profitFactor,
-      avgWin,
-      avgLoss,
-      totalTrades,
-      totalPnL,
-    };
-  }, [demoAccount?.tradeHistory]);
-
-  // Open Positions DataGrid columns
-  const openColumns: GridColDef[] = [
-    {
-      field: 'symbol',
-      headerName: 'Symbol',
-      flex: 1,
-      minWidth: 120,
-      renderCell: (params: any) => (
-        <Box display="flex" alignItems="center">
-          <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
-            {params.value ?? ''}
-          </Typography>
-          <Chip
-            label={params.row?.market ? params.row.market.toUpperCase() : 'N/A'}
-            size="small"
-            variant="outlined"
-            sx={{ ml: 1, fontSize: '0.7rem' }}
-          />
-        </Box>
-      ),
-    },
-    {
-      field: 'type',
-      headerName: 'Type',
-      flex: 0.8,
-      minWidth: 100,
-      renderCell: (params: any) => (
-        <Chip label={params.value} color={params.value === 'BUY' ? 'success' : 'error'} size="small" />
-      ),
-    },
-    {
-      field: 'quantity',
-      headerName: 'Quantity',
-      flex: 1,
-      minWidth: 100,
-      type: 'number' as const,
-      valueFormatter: (params: any) => params.value?.toLocaleString(),
-    },
-    {
-      field: 'entryPrice',
-      headerName: 'Entry Price',
-      flex: 1,
-      minWidth: 120,
-      renderCell: (params: any) => (
-        <span>{safeNumber(params.value)}</span>
-      ),
-    },
-    {
-      field: 'currentPrice',
-      headerName: 'Current Price',
-      flex: 1,
-      minWidth: 120,
-      renderCell: (params: any) => (
-        <span>{safeNumber(params.value)}</span>
-      ),
-    },
-    {
-      field: 'pnl',
-      headerName: 'P&L',
-      flex: 1,
-      minWidth: 120,
-      renderCell: (params: any) => (
-        <span>{safeCurrency(params.value)}</span>
-      ),
-      cellClassName: (params: any) => (params.value >= 0 ? 'positiveCell' : 'negativeCell'),
-    },
-    {
-      field: 'pnlPercentage',
-      headerName: 'P&L %',
-      flex: 1,
-      minWidth: 150,
-      renderCell: (params: any) => (
-        <Box display="flex" alignItems="center" gap={1}>
-          <LinearProgress
-            variant="determinate"
-            value={Math.min(Math.abs(params.value ?? 0), 100)}
-            sx={{
-              width: 60,
-              height: 6,
-              borderRadius: 3,
-              backgroundColor: 'rgba(255,255,255,0.1)',
-              '& .MuiLinearProgress-bar': {
-                backgroundColor: params.value >= 0 ? theme.palette.success.main : theme.palette.error.main,
-                borderRadius: 3,
-              },
-            }}
-          />
-          <Typography
-            variant="body2"
-            sx={{
-              color: params.value >= 0 ? theme.palette.success.main : theme.palette.error.main,
-              fontWeight: 'bold',
-              minWidth: '50px',
-            }}
-          >
-            {params.value !== undefined && params.value !== null
-              ? Number(params.value).toFixed(2)
-              : '0.00'}%
-          </Typography>
-        </Box>
-      ),
-    },
-    {
-      field: 'actions',
-      headerName: 'Actions',
-      flex: 0.8,
-      minWidth: 140,
-      sortable: false,
-      filterable: false,
-      renderCell: (params: any) => (
-        <Box display="flex" gap={1}>
-          <IconButton size="small" onClick={() => handleEditPosition(params.row)} sx={{ color: theme.palette.primary.main }}>
-            <Edit fontSize="small" />
-          </IconButton>
-          <Button
-            size="small"
-            color="error"
-            variant="outlined"
-            onClick={() => handleClosePosition(params.row.id)}
-          >
-            Close
-          </Button>
-        </Box>
-      ),
-    },
-  ];
-
-  // Closed Positions DataGrid columns
-  const closedColumns: GridColDef[] = [
-    {
-      field: 'symbol',
-      headerName: 'Symbol',
-      flex: 1,
-      minWidth: 120,
-      renderCell: (params: any) => (
-        <Box display="flex" alignItems="center">
-          <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
-            {params.value}
-          </Typography>
-          <Chip label={params.row.market?.toUpperCase() || ''} size="small" variant="outlined" sx={{ ml: 1, fontSize: '0.7rem' }} />
-        </Box>
-      ),
-    },
-    {
-      field: 'type',
-      headerName: 'Type',
-      flex: 0.8,
-      minWidth: 100,
-      renderCell: (params: any) => (
-        <Chip label={params.value} color={params.value === 'BUY' ? 'success' : 'error'} size="small" />
-      ),
-    },
-    {
-      field: 'quantity',
-      headerName: 'Quantity',
-      flex: 1,
-      minWidth: 100,
-      type: 'number' as const,
-      valueFormatter: (params: any) => params.value?.toLocaleString(),
-    },
-    {
-      field: 'entryPrice',
-      headerName: 'Entry Price',
-      flex: 1,
-      minWidth: 120,
-      valueFormatter: (params: any) =>
-        params.row.market === 'forex' ? Number(params.value).toFixed(4) : Number(params.value).toFixed(2),
-    },
-    {
-      field: 'currentPrice',
-      headerName: 'Exit Price',
-      flex: 1,
-      minWidth: 120,
-      valueFormatter: (params: any) =>
-        params.row.market === 'forex' ? Number(params.value).toFixed(4) : Number(params.value).toFixed(2),
-    },
-    {
-      field: 'pnl',
-      headerName: 'P&L',
-      flex: 1,
-      minWidth: 140,
-      type: 'number' as const,
-      valueFormatter: (params: any) => `$${Number(params.value).toFixed(2)} (${Number(params.row.pnlPercentage).toFixed(2)}%)`,
-      cellClassName: (params: any) => (params.value >= 0 ? 'positiveCell' : 'negativeCell'),
-    },
-    {
-      field: 'openDate',
-      headerName: 'Date',
-      flex: 1,
-      minWidth: 140,
-      valueFormatter: (params: any) => new Date(params.value).toLocaleDateString(),
-    },
-  ];
-
-  // Add this component after RealizedPnLCard
+  // Trading Recommendations Component
   const TradingRecommendations: React.FC<{ data: {
     winRate: number;
     profitFactor: number;
@@ -647,511 +721,378 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
     avgLoss: number;
     totalTrades: number;
     totalPnL: number;
+    takeProfitHits: number;
+    stopLossHits: number;
+    avgHoldingTime: number;
   } }> = ({ data }) => {
-    const theme = useTheme();
-    
     const getRecommendations = () => {
       const recommendations = [];
       
-      // Win Rate Analysis
-      if (data.winRate < 40) {
+      if (data.winRate < 50) {
         recommendations.push({
           type: 'warning',
-          title: 'Low Win Rate',
-          message: 'Your win rate is below 40%. Consider improving your entry strategy or risk management.',
-          action: 'Review your technical analysis and wait for stronger signals before entering trades.'
-        });
-      } else if (data.winRate > 70) {
-        recommendations.push({
-          type: 'success',
-          title: 'Excellent Win Rate',
-          message: 'Your win rate is above 70%. Great job on trade selection!',
-          action: 'Consider increasing position sizes gradually while maintaining strict risk management.'
+          message: 'Win rate below 50%. Consider reviewing your entry/exit strategies.',
+          icon: <Warning />,
         });
       }
       
-      // Profit Factor Analysis
-      if (data.profitFactor < 1) {
-        recommendations.push({
-          type: 'error',
-          title: 'Negative Profit Factor',
-          message: 'Your losses exceed your profits. This indicates poor risk-reward management.',
-          action: 'Focus on cutting losses early and letting winners run. Consider a 1:2 risk-reward ratio.'
-        });
-      } else if (data.profitFactor > 2) {
-        recommendations.push({
-          type: 'success',
-          title: 'Strong Profit Factor',
-          message: 'Your profit factor is excellent, indicating good risk-reward management.',
-          action: 'Maintain your current strategy and consider scaling up your trading size.'
-        });
-      }
-      
-      // Average Win vs Loss Analysis
-      if (data.avgWin > 0 && data.avgLoss < 0 && Math.abs(data.avgLoss) > data.avgWin * 2) {
+      if (data.profitFactor < 1.5) {
         recommendations.push({
           type: 'warning',
-          title: 'Large Average Losses',
-          message: 'Your average loss is more than 2x your average win. This is unsustainable.',
-          action: 'Implement stricter stop-losses and avoid holding losing positions too long.'
+          message: 'Profit factor below 1.5. Focus on improving risk-reward ratios.',
+          icon: <Assessment />,
         });
       }
       
-      // Total Trades Analysis
-      if (data.totalTrades < 10) {
+      if (data.takeProfitHits > data.stopLossHits * 2) {
         recommendations.push({
           type: 'info',
-          title: 'Limited Trading History',
-          message: 'You have limited trading data. More trades will provide better performance insights.',
-          action: 'Continue trading with small position sizes to build a larger sample size.'
+          message: 'Good take profit execution. Consider tightening stop losses.',
+          icon: <CheckCircle />,
         });
       }
       
-      // Overall Performance
-      if (data.totalPnL > 0 && data.winRate > 50 && data.profitFactor > 1.5) {
+      if (data.avgHoldingTime < 2) {
+        recommendations.push({
+          type: 'info',
+          message: 'Short average holding time. Consider longer-term positions.',
+          icon: <Timeline />,
+        });
+      }
+      
+      if (data.totalPnL > 0 && data.winRate > 60) {
         recommendations.push({
           type: 'success',
-          title: 'Strong Overall Performance',
-          message: 'You\'re showing consistent profitability with good risk management.',
-          action: 'Consider documenting your successful strategies and gradually increasing position sizes.'
-        });
-      }
-      
-      // Default recommendation if no specific issues
-      if (recommendations.length === 0) {
-        recommendations.push({
-          type: 'info',
-          title: 'Keep Learning',
-          message: 'Your trading performance shows room for improvement.',
-          action: 'Focus on consistent risk management, proper position sizing, and continuous learning.'
+          message: 'Excellent performance! Keep up the good work.',
+          icon: <CheckCircle />,
         });
       }
       
       return recommendations;
     };
-    
+
     const recommendations = getRecommendations();
-    
-    const getAlertSeverity = (type: string) => {
-      switch (type) {
-        case 'success': return 'success';
-        case 'warning': return 'warning';
-        case 'error': return 'error';
-        default: return 'info';
-      }
-    };
-    
-    const getIcon = (type: string) => {
-      switch (type) {
-        case 'success': return '🎯';
-        case 'warning': return '⚠️';
-        case 'error': return '🚨';
-        default: return '💡';
-      }
-    };
-    
+
     return (
-      <Paper
-        sx={{
-          mb: 4,
-          background: theme.palette.background.paper,
-          backdropFilter: 'blur(10px)',
-          border: `1px solid ${theme.palette.divider}`,
-        }}
-      >
-        <Box p={3}>
-          <Typography variant="h5" sx={{ color: theme.palette.primary.main, fontWeight: 'bold', mb: 3 }}>
-            📊 Trading Recommendations
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Psychology />
+            Trading Recommendations
           </Typography>
-          
-          <Grid container spacing={2}>
-            {recommendations.map((rec, index) => (
-              <Grid size={{ xs: 12, md: 6 }} key={index}>
-                <Alert 
-                  severity={getAlertSeverity(rec.type)}
-                  sx={{
-                    '& .MuiAlert-message': {
-                      width: '100%'
-                    }
-                  }}
+          {recommendations.length > 0 ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {recommendations.map((rec, index) => (
+                <Alert
+                  key={index}
+                  severity={rec.type}
+                  icon={rec.icon}
+                  sx={{ '& .MuiAlert-message': { fontSize: '0.875rem' } }}
                 >
-                  <Box>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
-                      {getIcon(rec.type)} {rec.title}
-                    </Typography>
-                    <Typography variant="body2" sx={{ mb: 1 }}>
-                      {rec.message}
-                    </Typography>
-                    <Typography variant="caption" sx={{ fontStyle: 'italic', opacity: 0.8 }}>
-                      💡 Action: {rec.action}
-                    </Typography>
-                  </Box>
+                  {rec.message}
                 </Alert>
-              </Grid>
-            ))}
-          </Grid>
-          
-          {/* General Trading Tips */}
-          <Box mt={3} p={2} sx={{ backgroundColor: theme.palette.action.hover, borderRadius: 2 }}>
-            <Typography variant="h6" sx={{ mb: 2, color: theme.palette.primary.main }}>
-              🎓 General Trading Tips
+              ))}
+            </Box>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              No specific recommendations at this time.
             </Typography>
-            <Grid container spacing={2}>
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <Box textAlign="center">
-                  <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
-                    📈 Risk Management
-                  </Typography>
-                  <Typography variant="caption">
-                    Never risk more than 1-2% of your account per trade
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <Box textAlign="center">
-                  <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
-                    🎯 Risk-Reward
-                  </Typography>
-                  <Typography variant="caption">
-                    Aim for at least 1:2 risk-reward ratio on trades
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <Box textAlign="center">
-                  <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
-                    📊 Keep Records
-                  </Typography>
-                  <Typography variant="caption">
-                    Document your trades and review performance regularly
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <Box textAlign="center">
-                  <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
-                    🧘 Stay Disciplined
-                  </Typography>
-                  <Typography variant="caption">
-                    Stick to your trading plan and avoid emotional decisions
-                  </Typography>
-                </Box>
-              </Grid>
-            </Grid>
-          </Box>
-        </Box>
-      </Paper>
+          )}
+        </CardContent>
+      </Card>
     );
   };
+
+  if (showPrompt) {
+    return (
+      <Container maxWidth="md" sx={{ py: 4 }}>
+        <Paper sx={{ p: 4, textAlign: 'center' }}>
+          <Typography variant="h4" gutterBottom>
+            Welcome to Your Demo Trading Account
+          </Typography>
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+            Start your trading journey with a $100,000 demo account. Practice with real market data and test your strategies risk-free.
+          </Typography>
+          <Button
+            variant="contained"
+            size="large"
+            onClick={handleCreateAccount}
+            disabled={accountActionLoading}
+            sx={{ mr: 2 }}
+          >
+            {accountActionLoading ? 'Creating...' : 'Create Demo Account'}
+          </Button>
+          {accountError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {accountError}
+            </Alert>
+          )}
+        </Paper>
+      </Container>
+    );
+  }
+
   return (
-    <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-      <Box mb={4}>
-        <Typography variant="h3" component="h1" gutterBottom sx={{ fontWeight: 'bold' }}>
-          Portfolio
+    <Container maxWidth="xl" sx={{ py: 3 }}>
+      {/* Header */}
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4" component="h1" gutterBottom>
+          Portfolio Dashboard
         </Typography>
-        <Typography variant="h6" color="text.secondary">
-          Track and manage your trading positions
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+          <Chip 
+            label={`WebSocket: ${wsConnected ? 'Connected' : 'Disconnected'}`} 
+            color={wsConnected ? 'success' : 'error'} 
+            variant="outlined" 
+          />
+          <Chip 
+            label={`${portfolioStats.openPositions} Open Positions`} 
+            color="primary" 
+            variant="outlined" 
+          />
+          <Chip 
+            label={`${portfolioStats.closedPositions} Closed Trades`} 
+            color="info" 
+            variant="outlined" 
+          />
+        </Box>
       </Box>
 
-      {/* Account Management Only */}
-      <Box mb={2} display="flex" alignItems="center" gap={2}>
+      {/* Notifications */}
+      <Snackbar
+        open={showNotifications && (notifications.positionClosed || notifications.takeProfitHit || notifications.stopLossHit)}
+        autoHideDuration={5000}
+        onClose={() => setShowNotifications(false)}
+      >
+        <Alert
+          severity={notifications.takeProfitHit ? 'success' : notifications.stopLossHit ? 'error' : 'info'}
+          onClose={() => dispatch(clearNotifications())}
+        >
+          {notifications.takeProfitHit && 'Take profit target reached!'}
+          {notifications.stopLossHit && 'Stop loss triggered!'}
+          {notifications.positionClosed && 'Position closed successfully!'}
+        </Alert>
+      </Snackbar>
+
+      {/* Position Alerts */}
+      {positionAlert && (
+        <Alert
+          severity={positionAlert.type}
+          icon={positionAlert.icon}
+          sx={{ mb: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => setShowNotifications(false)}>
+              Dismiss
+            </Button>
+          }
+        >
+          {positionAlert.message}
+        </Alert>
+      )}
+
+      {/* Statistics Cards */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="Account Balance"
+            value={safeCurrency(portfolioStats.balance)}
+            change={safeCurrency(portfolioStats.totalPnL)}
+            changeType={portfolioStats.totalPnL >= 0 ? 'positive' : 'negative'}
+            icon={<AccountBalance />}
+            color="primary"
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="Total P&L"
+            value={safeCurrency(portfolioStats.totalPnL)}
+            change={safePercentage(portfolioStats.totalReturnPercentage)}
+            changeType={portfolioStats.totalReturnPercentage >= 0 ? 'positive' : 'negative'}
+            icon={<ShowChart />}
+            color={portfolioStats.totalPnL >= 0 ? 'success' : 'error'}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="Win Rate"
+            value={`${portfolioStats.successRate.toFixed(1)}%`}
+            icon={<Assessment />}
+            color="info"
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <StatCard
+            title="Profit Factor"
+            value={portfolioStats.profitFactor.toFixed(2)}
+            icon={<Timeline />}
+            color="warning"
+          />
+        </Grid>
+      </Grid>
+
+      {/* Action Buttons */}
+      <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
         <Button
           variant="contained"
-          color="primary"
-          startIcon={demoAccount ? <RestartAltIcon /> : <Add />}
-          onClick={async () => {
-            setAccountActionLoading(true);
-            try {
-              if (!demoAccount) {
-                const res = await axios.post(`/api/demo-account/${userId}`);
-                setDemoAccount(res.data);
-                setAccountSuccess('Demo account created successfully!');
-              } else {
-                const res = await axios.patch(`/api/demo-account/${userId}/reset`, { balance: ORIGINAL_BALANCE });
-                setDemoAccount(res.data);
-                setAccountSuccess('Demo account reset successfully!');
-              }
-            } catch {
-              setAccountError('Failed to create/reset demo account.');
-            }
-            setAccountActionLoading(false);
-          }}
-          disabled={accountActionLoading}
-          sx={{
-            background: `linear-gradient(45deg, ${theme.palette.primary.main} 30%, ${theme.palette.secondary.main} 90%)`,
-            '&:hover': {
-              background: `linear-gradient(45deg, ${theme.palette.secondary.main} 30%, ${theme.palette.primary.dark || theme.palette.primary.main} 90%)`,
-            },
-            minWidth: 180,
-          }}
+          startIcon={<Add />}
+          onClick={handleAddPosition}
         >
-          {accountActionLoading
-            ? 'Processing...'
-            : demoAccount
-              ? 'Reset Account'
-              : 'Create Demo Account'}
+          Add Position
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<RestartAltIcon />}
+          onClick={handleCloseAllPositions}
+          disabled={!demoAccount?.openPositions?.length}
+        >
+          Close All Positions
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<RestartAltIcon />}
+          onClick={handleResetAccount}
+        >
+          Reset Account
         </Button>
       </Box>
 
-      {/* Portfolio Statistics */}
-      <Grid container spacing={3} mb={4}>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <StatCard
-            title="Total Value"
-            value={safeCurrency(totalValue)}
-            icon={<AccountBalance sx={{ fontSize: 40 }} />}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <StatCard
-            title="Total P&L"
-
-
-            value={safeCurrency(totalPnL)}
-            change={`${totalReturn.toFixed(2)}%`}
-            changeType={totalPnL >= 0 ? 'positive' : 'negative'}
-            icon={<ShowChart sx={{ fontSize: 40 }} />}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <StatCard
-            title="Open Positions"
-            value={openPositions.length.toString()}
-            icon={<Assessment sx={{ fontSize: 40 }} />}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <StatCard
-            title="Success Rate"
-
-            value={`${successRate.toFixed(2)}%`}
-            icon={<TrendingUp sx={{ fontSize: 40 }} />}
-          />
-        </Grid>
-        {/* New Realized P&L Card - Full Width */}
-        <Grid size={{ xs: 12 }}>
-          <Paper
-            sx={{
-              mb: 4,
-              background: theme.palette.background.paper,
-              backdropFilter: 'blur(10px)',
-              border: `1px solid ${theme.palette.divider}`,
-              p: 3,
-            }}
-          >
-            <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
-              <Typography variant="h5" sx={{ color: theme.palette.primary.main, fontWeight: 'bold' }}>
-                Realized P&L
-              </Typography>
-              <FormControl size="small" sx={{ minWidth: 120 }}>
-                <InputLabel>Period</InputLabel>
-                <Select
-                  value={realizedPnLPeriod}
-                  label="Period"
-                  onChange={(e) => setRealizedPnLPeriod(e.target.value)}
+      {/* Main Content Grid */}
+      <Grid container spacing={3}>
+        {/* Open Positions */}
+        <Grid item xs={12} lg={8}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Open Positions ({gridOpenPositionsWithPnL.length})
+            </Typography>
+            {gridOpenPositionsWithPnL.length > 0 ? (
+              <DataGrid
+                rows={gridOpenPositionsWithPnL}
+                columns={openPositionColumns}
+                pageSize={10}
+                rowsPerPageOptions={[5, 10, 25]}
+                disableSelectionOnClick
+                autoHeight
+                components={{
+                  Toolbar: GridToolbar,
+                }}
+                sx={{
+                  '& .MuiDataGrid-cell': {
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
+                  },
+                }}
+              />
+            ) : (
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <Typography variant="body1" color="text.secondary">
+                  No open positions
+                </Typography>
+                <Button
+                  variant="outlined"
+                  startIcon={<Add />}
+                  onClick={handleAddPosition}
+                  sx={{ mt: 1 }}
                 >
-                  <MenuItem value="7d">7 Days</MenuItem>
-                  <MenuItem value="30d">30 Days</MenuItem>
-                  <MenuItem value="all">All Time</MenuItem>
-                </Select>
-              </FormControl>
-            </Box>
-            <Grid container spacing={2}>
-              <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Total Trades</Typography>
-                  <Typography variant="h6" fontWeight="bold">{realizedPnLData.totalTrades}</Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Win Rate</Typography>
-                  <Typography variant="h6" fontWeight="bold">{realizedPnLData.winRate.toFixed(2)}%</Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Profit Factor</Typography>
-                  <Typography variant="h6" fontWeight="bold">{realizedPnLData.profitFactor.toFixed(2)}</Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Avg Win</Typography>
-                  <Typography variant="h6" fontWeight="bold">${realizedPnLData.avgWin.toFixed(2)}</Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Avg Loss</Typography>
-                  <Typography variant="h6" fontWeight="bold">${realizedPnLData.avgLoss.toFixed(2)}</Typography>
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Total Realized P&L</Typography>
-                  <Typography
-                    variant="h6"
-                    fontWeight="bold"
-                    sx={{
-                      color: realizedPnLData.totalPnL >= 0
-                        ? theme.palette.success.main
-                        : theme.palette.error.main,
-                    }}
-                  >
-                    ${realizedPnLData.totalPnL.toFixed(2)}
-                  </Typography>
-                </Box>
-              </Grid>
-            </Grid>
+                  Add Your First Position
+                </Button>
+              </Box>
+            )}
+          </Paper>
+        </Grid>
+
+        {/* Trading Recommendations */}
+        <Grid item xs={12} lg={4}>
+          <TradingRecommendations data={portfolioStats} />
+        </Grid>
+
+        {/* Trade History */}
+        <Grid item xs={12}>
+          <Paper sx={{ p: 2 }}>
+            <Typography variant="h6" gutterBottom>
+              Trade History ({gridClosedPositions.length})
+            </Typography>
+            {gridClosedPositions.length > 0 ? (
+              <DataGrid
+                rows={gridClosedPositions}
+                columns={closedPositionColumns}
+                pageSize={10}
+                rowsPerPageOptions={[5, 10, 25]}
+                disableSelectionOnClick
+                autoHeight
+                components={{
+                  Toolbar: GridToolbar,
+                }}
+                sx={{
+                  '& .MuiDataGrid-cell': {
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
+                  },
+                }}
+              />
+            ) : (
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <Typography variant="body1" color="text.secondary">
+                  No trade history yet
+                </Typography>
+              </Box>
+            )}
           </Paper>
         </Grid>
       </Grid>
 
-      {/* Trading Recommendations */}
-      {demoAccount?.tradeHistory?.length > 0 && (
-        <TradingRecommendations data={realizedPnLData} />
-      )}
-
-      {/* Open Positions DataGrid */}
-      <Paper
-        sx={{
-          mb: 4,
-          background: theme.palette.background.paper,
-          backdropFilter: 'blur(10px)',
-          border: `1px solid ${theme.palette.divider}`,
-          height: 400,
-        }}
-      >
-        <Box p={3} display="flex" justifyContent="space-between" alignItems="center">
-          <Typography variant="h5" sx={{ color: theme.palette.primary.main, fontWeight: 'bold' }}>
-            Open Positions
-          </Typography>
-          <Box display="flex" gap={2}>
-            <Button
-              variant="contained"
-              startIcon={<Add />}
-              onClick={handleAddPosition}
-              sx={{
-                background: `linear-gradient(45deg, ${theme.palette.primary.main} 30%, ${theme.palette.secondary.main} 90%)`,
-                '&:hover': {
-                  background: `linear-gradient(45deg, ${theme.palette.secondary.main} 30%, ${theme.palette.primary.dark || theme.palette.primary.main} 90%)`,
-                },
-              }}
-            >
-              Add Position
-            </Button>
-            <Button
-              variant="outlined"
-              color="error"
-              onClick={handleCloseAllPositions}
-              disabled={openPositions.length === 0}
-            >
-              Close All Positions
-            </Button>
-          </Box>
-        </Box>
-        <Box sx={{ height: 'calc(100% - 84px)' }}>
-          <DebugPanel positions={gridOpenPositionsWithPnL} />
-          <DataGrid
-            rows={gridOpenPositionsWithPnL}
-            columns={openColumns}
-            getRowId={(row: any) => row.id}
-            loading={loading}
-            slots={{
-              toolbar: GridToolbar,
-            }}
-            sx={{
-              '& .positiveCell': { color: theme.palette.success.main, fontWeight: 'bold' },
-              '& .negativeCell': { color: theme.palette.error.main, fontWeight: 'bold' },
-            }}
-            pagination
-            initialState={{
-              pagination: {
-                paginationModel: { pageSize: 5 },
-              }
-            }}
-            pageSizeOptions={[5, 10, 20]}
-          />
-        </Box>
-      </Paper>
-
-      {/* Trading History DataGrid */}
-      {closedPositions.length > 0 && (
-        <Paper
-          sx={{
-            mb: 4,
-            background: theme.palette.background.paper,
-            backdropFilter: 'blur(10px)',
-            border: `1px solid ${theme.palette.divider}`,
-            height: 400,
-          }}
-        >
-          <Box p={3}>
-            <Typography variant="h5" sx={{ color: theme.palette.primary.main, fontWeight: 'bold' }}>
-              Trading History
-            </Typography>
-          </Box>
-          <Box sx={{ height: 'calc(100% - 72px)' }}>
-            <DataGrid
-              rows={gridClosedPositions}
-              columns={closedColumns}
-              getRowId={(row: any) => row.id}
-              loading={loading}
-              slots={{
-                toolbar: GridToolbar,
-              }}
-              sx={{
-                '& .positiveCell': { color: theme.palette.success.main, fontWeight: 'bold' },
-                '& .negativeCell': { color: theme.palette.error.main, fontWeight: 'bold' },
-              }}
-              initialState={{
-                pagination: {
-                  paginationModel: { pageSize: 5 },
-                }
-              }}
-              pageSizeOptions={[5, 10, 20]}
-            />
-          </Box>
-        </Paper>
-      )}
-
-      {/* Position Dialog */}
-      <Dialog
-        open={openDialog}
-        onClose={handleCloseDialog}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{
-          sx: {
-            background: theme.palette.background.paper,
-            backdropFilter: 'blur(10px)',
-            border: `1px solid ${theme.palette.divider}`,
-          },
-        }}
-      >
-        <DialogTitle sx={{ color: theme.palette.primary.main }}>
+      {/* Add/Edit Position Dialog */}
+      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
           {selectedPosition ? 'Edit Position' : 'Add New Position'}
         </DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid size={{ xs: 12, sm: 6 }}>
+            <Grid item xs={12} sm={6}>
               <TextField
                 fullWidth
                 label="Symbol"
                 value={newPosition.symbol}
-                onChange={(e) => setNewPosition((prev) => ({ ...prev, symbol: e.target.value }))}
-                placeholder="e.g., BTCUSDT, EURUSD, AAPL"
+                onChange={(e) => setNewPosition({ ...newPosition, symbol: e.target.value })}
               />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Type</InputLabel>
+                <Select
+                  value={newPosition.type}
+                  onChange={(e) => setNewPosition({ ...newPosition, type: e.target.value as 'BUY' | 'SELL' })}
+                  label="Type"
+                >
+                  <MenuItem value="BUY">BUY</MenuItem>
+                  <MenuItem value="SELL">SELL</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Quantity"
+                type="number"
+                value={newPosition.quantity}
+                onChange={(e) => setNewPosition({ ...newPosition, quantity: e.target.value })}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Entry Price"
+                type="number"
+                value={newPosition.entryPrice}
+                onChange={(e) => setNewPosition({ ...newPosition, entryPrice: e.target.value })}
+              />
+            </Grid>
+            <Grid item xs={12}>
               <FormControl fullWidth>
                 <InputLabel>Market</InputLabel>
                 <Select
                   value={newPosition.market}
+                  onChange={(e) => setNewPosition({ ...newPosition, market: e.target.value })}
                   label="Market"
-                  onChange={(e) => setNewPosition((prev) => ({ ...prev, market: e.target.value }))}
                 >
                   <MenuItem value="crypto">Crypto</MenuItem>
                   <MenuItem value="forex">Forex</MenuItem>
@@ -1160,85 +1101,36 @@ const fetchMultiMarketPrices = async (positions: any[]) => {
                 </Select>
               </FormControl>
             </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <FormControl fullWidth>
-                <InputLabel>Type</InputLabel>
-                <Select
-                  value={newPosition.type}
-                  label="Type"
-                  onChange={(e) =>
-                    setNewPosition((prev) => ({
-                      ...prev,
-                      type: e.target.value as 'BUY' | 'SELL',
-                    }))
-                  }
-                >
-                  <MenuItem value="BUY">Buy</MenuItem>
-                  <MenuItem value="SELL">Sell</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                fullWidth
-                label="Quantity"
-                type="number"
-                value={newPosition.quantity}
-                onChange={(e) => setNewPosition((prev) => ({ ...prev, quantity: e.target.value }))}
-              />
-            </Grid>
-            <Grid size={{ xs: 12 }}>
-              <TextField
-                fullWidth
-                label="Entry Price"
-                type="number"
-                value={newPosition.entryPrice}
-                onChange={(e) => setNewPosition((prev) => ({ ...prev, entryPrice: e.target.value }))}
-                inputProps={{ step: '0.0001' }}
-              />
-            </Grid>
           </Grid>
+          
+          {accountError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {accountError}
+            </Alert>
+          )}
+          
+          {accountSuccess && (
+            <Alert severity="success" sx={{ mt: 2 }}>
+              {accountSuccess}
+            </Alert>
+          )}
         </DialogContent>
-        <DialogActions sx={{ p: 3 }}>
-          <Button onClick={handleCloseDialog} sx={{ color: theme.palette.text.secondary }}>
-            Cancel
-          </Button>
+        <DialogActions>
+          <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
           <Button
             onClick={handleSavePosition}
             variant="contained"
-            sx={{
-              background: `linear-gradient(45deg, ${theme.palette.primary.main} 30%, ${theme.palette.secondary.main} 90%)`,
-              '&:hover': {
-                background: `linear-gradient(45deg, ${theme.palette.secondary.main} 30%, ${theme.palette.primary.dark || theme.palette.primary.main} 90%)`,
-              },
-            }}
+            disabled={accountActionLoading}
           >
-            {selectedPosition ? 'Update' : 'Add'} Position
+            {accountActionLoading ? 'Saving...' : 'Save Position'}
           </Button>
         </DialogActions>
       </Dialog>
 
-      <Snackbar
-        open={!!accountSuccess}
-        autoHideDuration={3000}
-        onClose={() => setAccountSuccess('')}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert severity="success" onClose={() => setAccountSuccess('')}>
-          {accountSuccess}
-        </Alert>
-      </Snackbar>
-      <Snackbar
-        open={!!accountError}
-        autoHideDuration={4000}
-        onClose={() => setAccountError('')}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-      >
-        <Alert severity="error" onClose={() => setAccountError('')}>
-          {accountError}
-        </Alert>
-      </Snackbar>
+      {/* Debug Panel */}
+      <DebugPanel />
     </Container>
   );
 };
+
 export default Portfolio;

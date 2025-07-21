@@ -1,11 +1,13 @@
 // Core types for the trading app
 
-export type SignalType = 'BUY' | 'SELL';
+export type SignalType = 'BUY' | 'SELL' | 'HOLD';
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
 export type SubscriptionTier = 'FREE' | 'PREMIUM';
 export type Sentiment = 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL';
 export type TradeType = 'buy' | 'sell';
 export type PositionStatus = 'open' | 'closed';
+export type SignalSource = 'ai' | 'manual' | 'copy_trading' | 'enterprise_ml';
+export type SignalStatus = 'active' | 'executed' | 'expired' | 'cancelled';
 
 export interface TradingSignal {
   id: string;
@@ -13,14 +15,49 @@ export interface TradingSignal {
   type: SignalType;
   confidence: number;
   entryPrice: number;
-  takeProfit: number;
+  targetPrice: number; // Renamed from takeProfit for consistency
   stopLoss: number;
-  timestamp: Date;
+  timeframe: string;
+  market: 'forex' | 'crypto' | 'stocks' | 'commodities';
+  description: string;
   reasoning: string;
-  riskLevel: RiskLevel;
-  tags?: string[]; // e.g. ['forex', 'momentum']
-  createdAt?: Date;
-  updatedAt?: Date;
+  technicalIndicators?: {
+    rsi?: number;
+    macd?: number;
+    sma?: number;
+    ema?: number;
+    bollinger?: {
+      upper: number;
+      middle: number;
+      lower: number;
+    };
+    // Enterprise ML specific indicators
+    mlPredictions?: any;
+    source?: string;
+    modelUsed?: string;
+  };
+  status: SignalStatus;
+  createdAt: string;
+  expiresAt: string;
+  executedAt?: string;
+  executedPrice?: number;
+  currentPrice?: number;
+  pnl?: number;
+  pnlPercentage?: number;
+  tags: string[];
+  source: SignalSource;
+  accuracy?: number;
+  risk: 'low' | 'medium' | 'high';
+  
+  // Enterprise ML specific fields
+  positionSize?: number;
+  counterfactuals?: Record<string, any>;
+  featureImportance?: Record<string, number>;
+  metadata?: {
+    processingTime?: number;
+    modelsUsed?: string[];
+    latency?: number;
+  };
 }
 
 export interface MarketData {

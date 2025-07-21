@@ -3,7 +3,7 @@ import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 export interface TradingSignal {
   id: string;
   symbol: string;
-  type: 'BUY' | 'SELL';
+  type: 'BUY' | 'SELL' | 'HOLD';
   confidence: number;
   entryPrice: number;
   targetPrice: number;
@@ -22,6 +22,10 @@ export interface TradingSignal {
       middle: number;
       lower: number;
     };
+    // Enterprise ML specific indicators
+    mlPredictions?: any;
+    source?: string;
+    modelUsed?: string;
   };
   status: 'active' | 'executed' | 'expired' | 'cancelled';
   createdAt: string;
@@ -32,9 +36,17 @@ export interface TradingSignal {
   pnl?: number;
   pnlPercentage?: number;
   tags: string[];
-  source: 'ai' | 'manual' | 'copy_trading';
+  source: 'ai' | 'manual' | 'copy_trading' | 'enterprise_ml';
   accuracy?: number;
   risk: 'low' | 'medium' | 'high';
+  positionSize?: number;
+  counterfactuals?: Record<string, any>;
+  featureImportance?: Record<string, number>;
+  metadata?: {
+    processingTime?: number;
+    modelsUsed?: string[];
+    latency?: number;
+  };
 }
 
 export interface SignalFilter {

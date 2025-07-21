@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from './redux';
 import { addSignal, updateSignal } from '../store/slices/signalSlice';
+import { TradingSignal } from '../types';
 
 export interface WebSocketMessage {
   type: string;
@@ -22,7 +23,7 @@ export interface MarketData {
 export interface TradingSignal {
   id: string;
   symbol: string;
-  type: 'BUY' | 'SELL';
+  type: 'BUY' | 'SELL' | 'HOLD';
   confidence: number;
   entryPrice: number;
   targetPrice: number;
@@ -30,7 +31,41 @@ export interface TradingSignal {
   timeframe: string;
   market: string;
   description: string;
-  timestamp: number;
+  reasoning: string;
+  technicalIndicators: {
+    rsi?: number;
+    macd?: number;
+    sma?: number;
+    ema?: number;
+    bollinger?: {
+      upper: number;
+      middle: number;
+      lower: number;
+    };
+    mlPredictions?: any;
+    source?: string;
+    modelUsed?: string;
+  };
+  status: 'active' | 'executed' | 'expired' | 'cancelled';
+  createdAt: string;
+  expiresAt: string;
+  executedAt?: string;
+  executedPrice?: number;
+  currentPrice?: number;
+  pnl?: number;
+  pnlPercentage?: number;
+  tags: string[];
+  source: 'ai' | 'manual' | 'copy_trading' | 'enterprise_ml';
+  accuracy?: number;
+  risk: 'low' | 'medium' | 'high';
+  positionSize?: number;
+  counterfactuals?: Record<string, any>;
+  featureImportance?: Record<string, number>;
+  metadata?: {
+    processingTime?: number;
+    modelsUsed?: string[];
+    latency?: number;
+  };
 }
 
 interface UseWebSocketOptions {
@@ -41,6 +76,8 @@ interface UseWebSocketOptions {
   onClose?: () => void;
   onError?: (error: Event) => void;
   onMessage?: (message: WebSocketMessage) => void;
+  onSignalReceived?: (signal: TradingSignal) => void;
+  onPortfolioUpdate?: (data: any) => void;
 }
 
 interface UseWebSocketReturn {
@@ -53,17 +90,26 @@ interface UseWebSocketReturn {
   disconnect: () => void;
   subscribe: (channel: string) => void;
   unsubscribe: (channel: string) => void;
+  lastMessage: WebSocketMessage | null;
+  connectionStats: {
+    messagesReceived: number;
+    messagesSent: number;
+    lastPing: number | null;
+    lastPong: number | null;
+  };
 }
 
 const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => {
   const {
-    url = process.env.REACT_APP_WS_URL || 'wss://api.apterra.com/ws',
+    url = process.env.REACT_APP_WS_URL || 'ws://localhost:5000',
     reconnectAttempts = 5,
     reconnectInterval = 3000,
     onOpen,
     onClose,
     onError,
     onMessage,
+    onSignalReceived,
+    onPortfolioUpdate,
   } = options;
 
   const dispatch = useAppDispatch();
@@ -73,6 +119,13 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
+  const [connectionStats, setConnectionStats] = useState({
+    messagesReceived: 0,
+    messagesSent: 0,
+    lastPing: null as number | null,
+    lastPong: null as number | null,
+  });
   
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -98,7 +151,9 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
     
     heartbeatIntervalRef.current = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+        const pingMessage = { type: 'ping', timestamp: Date.now() };
+        ws.send(JSON.stringify(pingMessage));
+        setConnectionStats(prev => ({ ...prev, lastPing: Date.now() }));
       }
     }, 30000); // Send ping every 30 seconds
   }, []);
@@ -113,11 +168,55 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const message: WebSocketMessage = JSON.parse(event.data);
+      setLastMessage(message);
+      setConnectionStats(prev => ({ ...prev, messagesReceived: prev.messagesReceived + 1 }));
       
       // Handle different message types
       switch (message.type) {
         case 'pong':
-          // Heartbeat response - no action needed
+          setConnectionStats(prev => ({ ...prev, lastPong: Date.now() }));
+          break;
+          
+        case 'welcome':
+          console.log('🤝 WebSocket welcome message:', message.data);
+          break;
+          
+        case 'new_signal':
+          // Handle enterprise ML signals
+          const signal = message.signal || message.data;
+          if (signal) {
+            console.log('🎯 New signal received:', signal);
+            
+            // Validate signal structure
+            if (signal.symbol && signal.type && signal.confidence) {
+              // Add enterprise ML specific validation
+              if (signal.source === 'enterprise_ml') {
+                console.log('🤖 Enterprise ML Signal:', {
+                  symbol: signal.symbol,
+                  type: signal.type,
+                  confidence: signal.confidence,
+                  source: signal.source,
+                  metadata: signal.metadata,
+                });
+              }
+              
+              dispatch(addSignal(signal));
+              
+              // Call custom signal handler
+              if (onSignalReceived) {
+                onSignalReceived(signal);
+              }
+            } else {
+              console.warn('⚠️ Invalid signal structure:', signal);
+            }
+          }
+          break;
+          
+        case 'update_signal':
+          const updatedSignal = message.signal || message.data;
+          if (updatedSignal) {
+            dispatch(updateSignal(updatedSignal));
+          }
           break;
           
         case 'market_data':
@@ -125,14 +224,30 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
           dispatch({ type: 'market/updateData', payload: message.data });
           break;
           
-        case 'trading_signal':
-          // Add new trading signal
-          dispatch({ type: 'signals/addSignal', payload: message.data });
-          break;
-          
         case 'portfolio_update':
           // Update portfolio data
           dispatch({ type: 'portfolio/updatePosition', payload: message.data });
+          
+          // Call custom portfolio handler
+          if (onPortfolioUpdate) {
+            onPortfolioUpdate(message.data);
+          }
+          break;
+          
+        case 'position_closed':
+          // Handle position closure notifications
+          console.log('💰 Position closed:', message.data);
+          dispatch({ type: 'portfolio/positionClosed', payload: message.data });
+          break;
+          
+        case 'take_profit_hit':
+        case 'stop_loss_hit':
+          // Handle automatic position closures
+          console.log(`🎯 ${message.type}:`, message.data);
+          dispatch({ type: 'portfolio/autoPositionClosed', payload: {
+            ...message.data,
+            closureType: message.type
+          }});
           break;
           
         case 'notification':
@@ -141,12 +256,12 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
           break;
           
         case 'error':
-          console.error('WebSocket error:', message.data);
+          console.error('❌ WebSocket error:', message.data);
           setError(message.data.message || 'Unknown error');
           break;
           
         default:
-          console.log('Unknown message type:', message.type);
+          console.log('📨 Unknown message type:', message.type, message.data);
       }
       
       // Call custom message handler if provided
@@ -154,10 +269,10 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
         onMessage(message);
       }
     } catch (err) {
-      console.error('Failed to parse WebSocket message:', err);
+      console.error('❌ Failed to parse WebSocket message:', err);
       setError('Failed to parse message');
     }
-  }, [dispatch, onMessage]);
+  }, [dispatch, onMessage, onSignalReceived, onPortfolioUpdate]);
 
   const connect = useCallback(() => {
     if (socket?.readyState === WebSocket.OPEN || isConnecting) {
@@ -172,7 +287,7 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
       const newSocket = new WebSocket(wsUrl);
 
       newSocket.onopen = () => {
-        console.log('WebSocket connected');
+        console.log('🔌 WebSocket connected');
         setIsConnected(true);
         setIsConnecting(false);
         setError(null);
@@ -196,7 +311,7 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
       };
 
       newSocket.onclose = (event) => {
-        console.log('WebSocket disconnected:', event.code, event.reason);
+        console.log('🔌 WebSocket disconnected:', event.code, event.reason);
         setIsConnected(false);
         setIsConnecting(false);
         stopHeartbeat();
@@ -208,7 +323,7 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
         // Attempt to reconnect if not manually closed
         if (event.code !== 1000 && reconnectAttemptsRef.current < reconnectAttempts) {
           reconnectAttemptsRef.current++;
-          console.log(`Attempting to reconnect... (${reconnectAttemptsRef.current}/${reconnectAttempts})`);
+          console.log(`🔄 Attempting to reconnect... (${reconnectAttemptsRef.current}/${reconnectAttempts})`);
           
           reconnectTimeoutRef.current = setTimeout(() => {
             connect();
@@ -219,7 +334,7 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
       };
 
       newSocket.onerror = (event) => {
-        console.error('WebSocket error:', event);
+        console.error('❌ WebSocket error:', event);
         setError('Connection error');
         setIsConnecting(false);
         
@@ -228,62 +343,45 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
         }
       };
 
-      newSocket.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'new_signal') {
-          dispatch(addSignal(data.signal));
-        } else if (data.type === 'update_signal') {
-          dispatch(updateSignal(data.signal));
-        }
-      };
+      newSocket.onmessage = handleMessage;
 
       setSocket(newSocket);
     } catch (err) {
-      console.error('Failed to create WebSocket connection:', err);
+      console.error('❌ Failed to create WebSocket connection:', err);
       setError('Failed to create connection');
       setIsConnecting(false);
     }
-  }, [url, token, socket, isConnecting, reconnectAttempts, reconnectInterval, startHeartbeat, stopHeartbeat, handleMessage, onOpen, onClose, onError, dispatch]);
+  }, [url, token, socket, isConnecting, reconnectAttempts, reconnectInterval, startHeartbeat, stopHeartbeat, handleMessage, onOpen, onClose, onError]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
     }
-    
-    stopHeartbeat();
-    
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+    }
     if (socket) {
       socket.close(1000, 'Manual disconnect');
-      setSocket(null);
     }
-    
     setIsConnected(false);
     setIsConnecting(false);
-    reconnectAttemptsRef.current = reconnectAttempts; // Prevent auto-reconnect
-  }, [socket, reconnectAttempts, stopHeartbeat]);
+  }, [socket]);
 
   const sendMessage = useCallback((message: any) => {
     if (socket?.readyState === WebSocket.OPEN) {
-      try {
-        const messageWithTimestamp = {
-          ...message,
-          timestamp: Date.now()
-        };
-        socket.send(JSON.stringify(messageWithTimestamp));
-      } catch (err) {
-        console.error('Failed to send message:', err);
-        setError('Failed to send message');
-      }
+      const messageWithTimestamp = {
+        ...message,
+        timestamp: Date.now()
+      };
+      socket.send(JSON.stringify(messageWithTimestamp));
+      setConnectionStats(prev => ({ ...prev, messagesSent: prev.messagesSent + 1 }));
     } else {
-      console.warn('WebSocket is not connected');
-      setError('Not connected');
+      console.warn('⚠️ WebSocket not connected, cannot send message');
     }
   }, [socket]);
 
   const subscribe = useCallback((channel: string) => {
     subscriptionsRef.current.add(channel);
-    
     if (socket?.readyState === WebSocket.OPEN) {
       sendMessage({
         type: 'subscribe',
@@ -294,7 +392,6 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
 
   const unsubscribe = useCallback((channel: string) => {
     subscriptionsRef.current.delete(channel);
-    
     if (socket?.readyState === WebSocket.OPEN) {
       sendMessage({
         type: 'unsubscribe',
@@ -305,19 +402,10 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
 
   // Auto-connect when authenticated
   useEffect(() => {
-    if (isAuthenticated && !socket && !isConnecting) {
+    if (isAuthenticated && !isConnected && !isConnecting) {
       connect();
-    } else if (!isAuthenticated && socket) {
-      disconnect();
     }
-  }, [isAuthenticated, socket, isConnecting, connect, disconnect]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      disconnect();
-    };
-  }, [disconnect]);
+  }, [isAuthenticated, isConnected, isConnecting, connect]);
 
   return {
     socket,
@@ -329,6 +417,8 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
     disconnect,
     subscribe,
     unsubscribe,
+    lastMessage,
+    connectionStats,
   };
 };
 

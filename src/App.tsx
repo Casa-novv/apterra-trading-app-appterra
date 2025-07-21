@@ -4,6 +4,11 @@ import { CssBaseline, Box, Button } from '@mui/material';
 import { Provider } from 'react-redux';
 import { store } from './store';
 import { useAppDispatch, useAppSelector } from './hooks/redux';
+import useWebSocket from './hooks/useWebSocket';
+import useSignalNotifications from './hooks/useSignalNotifications';
+import autoTradeService from './services/autoTradeService';
+import signalCacheService from './services/signalCacheService';
+import errorHandlingService from './services/errorHandlingService';
 import './chartConfig';
 
 // Components
@@ -56,11 +61,43 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 // 🔹 Main Content Component
 const AppContent: React.FC = () => {
   const dispatch = useAppDispatch();
-  const { loading } = useAppSelector((state) => state.auth);
+  const { loading, isAuthenticated } = useAppSelector((state) => state.auth);
+
+  // WebSocket connection for real-time updates
+  const { isConnected, error: wsError } = useWebSocket({
+    onSignalReceived: (signal) => {
+      console.log('🎯 Signal received in App:', signal);
+      // Cache the signal for performance
+      signalCacheService.cacheSignal(signal);
+    },
+    onPortfolioUpdate: (data) => {
+      console.log('💰 Portfolio update received in App:', data);
+    },
+    onMessage: (message) => {
+      console.log('📨 WebSocket message in App:', message.type);
+    },
+    onError: (error) => {
+      console.error('❌ WebSocket error in App:', error);
+      errorHandlingService.handleError('websocket', 'WebSocket connection error', error, 'medium');
+    }
+  });
+
+  // Signal notifications and auto-trade integration
+  useSignalNotifications();
 
   useEffect(() => {
     dispatch(checkAuthStatus());
   }, [dispatch]);
+
+  // Log WebSocket connection status
+  useEffect(() => {
+    if (isAuthenticated) {
+      console.log(`🔌 WebSocket connection: ${isConnected ? 'Connected' : 'Disconnected'}`);
+      if (wsError) {
+        console.error('❌ WebSocket error:', wsError);
+      }
+    }
+  }, [isConnected, wsError, isAuthenticated]);
 
   return loading ? (
     <LoadingSpinner />

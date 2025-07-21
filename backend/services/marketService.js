@@ -1,103 +1,68 @@
-const priceService = require('./priceService');
+const axios = require('axios');
 
 class MarketService {
   constructor() {
-    this.cache = new Map();
-    this.cacheTimeout = 30000; // 30 seconds cache
+    this.lastUpdate = null;
+    this.prices = {};
+    this.isUpdating = false;
   }
 
   async updatePrices() {
+    if (this.isUpdating) {
+      return this.prices;
+    }
+
+    this.isUpdating = true;
+    
     try {
-      console.log('🔄 Starting price update cycle...');
+      console.log('📊 Updating market prices...');
       
-      // Get symbols from your database or config
-      const symbols = [
-        'BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'DOTUSDT', 'LINKUSDT',
-        'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD',
-        'AAPL', 'GOOGL', 'MSFT', 'TSLA'
-      ];
+      // Fetch basic crypto prices
+      const cryptoResponse = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd', {
+        timeout: 10000
+      });
       
-      const prices = await priceService.fetchPrices(symbols);
+      const cryptoData = cryptoResponse.data;
       
-      if (Object.keys(prices).length > 0) {
-        // Update your database with new prices
-        await this.savePricesToDatabase(prices);
-        
-        // Update cache
-        Object.entries(prices).forEach(([symbol, data]) => {
-          this.cache.set(symbol, {
-            ...data,
-            timestamp: Date.now()
-          });
-        });
-        
-        console.log(`✅ Updated ${Object.keys(prices).length} prices successfully`);
-        
-        // Log API status for monitoring
-        const apiStatus = priceService.getAPIStatus();
-        console.log('📊 API Status:', JSON.stringify(apiStatus, null, 2));
-        
-        return prices;
-      } else {
-        console.log('⚠️ No prices fetched from any API');
-        return {};
-      }
+      // Update prices
+      if (cryptoData.bitcoin) this.prices.BTC = cryptoData.bitcoin.usd;
+      if (cryptoData.ethereum) this.prices.ETH = cryptoData.ethereum.usd;
+      if (cryptoData.solana) this.prices.SOL = cryptoData.solana.usd;
+      
+      // Add some mock forex and stock prices for demo
+      this.prices.EURUSD = 1.0850 + (Math.random() - 0.5) * 0.01;
+      this.prices.GBPUSD = 1.2650 + (Math.random() - 0.5) * 0.01;
+      this.prices.USDJPY = 148.50 + (Math.random() - 0.5) * 1;
+      this.prices.AAPL = 175.00 + (Math.random() - 0.5) * 2;
+      this.prices.GOOGL = 140.00 + (Math.random() - 0.5) * 2;
+      this.prices.TSLA = 240.00 + (Math.random() - 0.5) * 5;
+      
+      this.lastUpdate = new Date();
+      console.log('✅ Market prices updated successfully');
+      
+      return this.prices;
     } catch (error) {
-      console.error('❌ Price update failed:', error.message);
-      return {};
+      console.error('❌ Error updating market prices:', error.message);
+      return this.prices;
+    } finally {
+      this.isUpdating = false;
     }
   }
 
-  async savePricesToDatabase(prices) {
-    try {
-      // Update your existing price saving logic here
-      // This should update your MongoDB collections
-      
-      const MarketData = require('../models/MarketData'); // Adjust path as needed
-      
-      const updates = Object.entries(prices).map(([symbol, data]) => ({
-        updateOne: {
-          filter: { symbol },
-          update: {
-            $set: {
-              symbol,
-              price: data.price,
-              change24h: data.change24h,
-              lastUpdated: new Date()
-            }
-          },
-          upsert: true
-        }
-      }));
-      
-      if (updates.length > 0) {
-        await MarketData.bulkWrite(updates);
-        console.log(`💾 Saved ${updates.length} prices to database`);
-      }
-    } catch (error) {
-      console.error('❌ Failed to save prices to database:', error.message);
-    }
+  getPrices() {
+    return this.prices;
   }
 
-  getCachedPrice(symbol) {
-    const cached = this.cache.get(symbol);
-    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-      return cached;
-    }
-    return null;
+  getLastUpdate() {
+    return this.lastUpdate;
   }
 
   async getPrice(symbol) {
-    // Try cache first
-    const cached = this.getCachedPrice(symbol);
-    if (cached) {
-      return cached;
+    if (!this.lastUpdate || Date.now() - this.lastUpdate.getTime() > 60000) {
+      await this.updatePrices();
     }
-    
-    // Fetch fresh data
-    const prices = await priceService.fetchPrices([symbol]);
-    return prices[symbol] || null;
+    return this.prices[symbol] || null;
   }
 }
 
-module.exports = new MarketService();
+module.exports = new MarketService(); 

@@ -25,8 +25,6 @@ import {
   Switch,
 } from '@mui/material';
 import {
-  Notifications,
-  AccountCircle,
   TrendingUp,
   Menu as MenuIcon,
   Dashboard,
@@ -42,34 +40,24 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { RootState } from '../../store';
 import { logout } from '../../store/slices/authSlice';
 import { toggleSidebar } from '../../store/slices/uiSlice';
+import NotificationSystem from '../UI/NotificationSystem';
 
 const Header: React.FC = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isAuthenticated } = useSelector((state: RootState) => state.auth);
-  const notifications = useSelector((state: RootState) => state.notifications.notifications || []);
   const sidebarOpen = useSelector((state: RootState) => state.ui?.sidebarOpen || false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const [notificationAnchor, setNotificationAnchor] = useState<null | HTMLElement>(null);
   const [logoutDialog, setLogoutDialog] = useState(false);
   const isMobile = useMediaQuery('(max-width:600px)');
-  // Optional: Theme toggle state (if your app supports it)
-  // const [darkMode, setDarkMode] = useState(false);
-
-  const unreadNotifications = notifications.filter((n: { read: boolean }) => !n.read).length;
 
   const handleMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
   };
 
-  const handleNotificationMenu = (event: React.MouseEvent<HTMLElement>) => {
-    setNotificationAnchor(event.currentTarget);
-  };
-
   const handleClose = () => {
     setAnchorEl(null);
-    setNotificationAnchor(null);
   };
 
   const handleLogout = () => {
@@ -161,13 +149,7 @@ const Header: React.FC = () => {
 
           {isAuthenticated ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Tooltip title="Notifications">
-                <IconButton color="inherit" onClick={handleNotificationMenu} aria-label="notifications">
-                  <Badge badgeContent={unreadNotifications} color="error">
-                    <Notifications />
-                  </Badge>
-                </IconButton>
-              </Tooltip>
+              <NotificationSystem />
 
               <Tooltip title="Account">
                 <IconButton
@@ -222,34 +204,7 @@ const Header: React.FC = () => {
                 </MenuItem>
               </Menu>
 
-              {/* Notifications Menu */}
-              <Menu
-                anchorEl={notificationAnchor}
-                open={Boolean(notificationAnchor)}
-                onClose={handleClose}
-                PaperProps={{
-                  sx: { width: 300, maxHeight: 400 },
-                }}
-              >
-                {notifications.length === 0 ? (
-                  <MenuItem>No notifications</MenuItem>
-                ) : (
-                  notifications
-                    .slice(0, 5)
-                    .map((notification: { id: string; message: string; timestamp: string | number | Date }) => (
-                      <MenuItem key={notification.id} onClick={handleClose}>
-                        <Box>
-                          <Typography variant="body2" fontWeight="bold">
-                            {notification.message}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {new Date(notification.timestamp).toLocaleTimeString()}
-                          </Typography>
-                        </Box>
-                      </MenuItem>
-                    ))
-                )}
-              </Menu>
+
 
               {/* Logout Confirmation Dialog */}
               <Dialog
