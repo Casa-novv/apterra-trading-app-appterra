@@ -397,6 +397,7 @@ const RedisTimeSeriesService = require('./services/dataIngestion/redisService');
 const StreamingFeatureFactory = require('./services/featureEngineering/streamingFeatureFactory');
 const MultiStageEnsembleSystem = require('./services/ml/ensembleSystem');
 const RealTimeInferenceService = require('./services/inference/inferenceService');
+const { listenForSignals } = require('./services/redisSubscriber');
 
 // Initialize enterprise ML services
 let marketDataService = null;
@@ -736,6 +737,20 @@ app.get('/api/enterprise-ml/analytics', async (req, res) => {
     console.log('🔄 Continuing with limited functionality (no database features)...');
   }
 })();
+
+// After WebSocket server setup
+listenForSignals((signal) => {
+  // Broadcast to all WebSocket clients
+  wss.clients.forEach(client => {
+    try {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ type: 'new_signal', signal }));
+      }
+    } catch (err) {
+      console.error('WebSocket send error:', err.message);
+    }
+  });
+});
 
 // Enhanced error handling middleware
 app.use((err, req, res, next) => {

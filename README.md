@@ -217,3 +217,59 @@ This project is licensed under the MIT License.
 ## 📞 Support
 
 For support and questions, please contact the development team or create an issue in the repository.
+
+# Supabase & Upstash Redis Integration
+
+## 1. Install Packages
+
+### Backend (Node.js)
+```
+npm install @supabase/supabase-js @upstash/redis
+```
+
+### Frontend (React)
+```
+npm install @supabase/supabase-js
+```
+
+## 2. Environment Variables
+
+Add these to your `.env` files:
+
+### Backend `.env`
+```
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SUPABASE_ANON_KEY=your-anon-key
+UPSTASH_REDIS_REST_URL=https://your-upstash-url.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your-upstash-token
+```
+
+### Frontend `.env`
+```
+REACT_APP_SUPABASE_URL=https://your-project.supabase.co
+REACT_APP_SUPABASE_ANON_KEY=your-anon-key
+```
+
+## 3. Supabase Table Setup
+
+Create a `signals` table in Supabase:
+```sql
+create table public.signals (
+  id uuid primary key default gen_random_uuid(),
+  symbol text not null,
+  type text not null,
+  confidence float,
+  entry_price float,
+  target_price float,
+  stop_loss float,
+  created_at timestamp with time zone default now()
+);
+```
+
+## 4. Usage
+- Backend publishes signals to Supabase and Redis.
+- Redis subscriber broadcasts signals to WebSocket clients.
+- Frontend listens for real-time updates from Supabase.
+
+See `backend/services/` and `src/components/signals/SupabaseSignalListener.tsx` for code examples.
