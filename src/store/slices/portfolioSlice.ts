@@ -65,6 +65,10 @@ const initialState: PortfolioState = {
     takeProfitHit: false,
     stopLossHit: false,
   },
+  // Add these defaults:
+  balance: 100000,         // or whatever default makes sense
+  openPositions: [],
+  portfolio: [],
 };
 
 export const fetchPortfolio = createAsyncThunk(

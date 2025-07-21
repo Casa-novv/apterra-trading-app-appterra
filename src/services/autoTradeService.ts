@@ -41,7 +41,6 @@ class AutoTradeService {
   private dailyTrades: number = 0;
   private dailyPnL: number = 0;
   private lastResetDate: string;
-  isEnabled: any;
 
   constructor() {
     this.criteria = this.getDefaultCriteria();
@@ -49,6 +48,11 @@ class AutoTradeService {
     this.lastResetDate = new Date().toDateString();
     this.loadSettings();
   }
+
+  public isEnabled(): boolean {
+    return this.criteria.enabled;
+  }
+  
 
   private getDefaultCriteria(): AutoTradeCriteria {
     return {

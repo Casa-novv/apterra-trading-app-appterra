@@ -45,7 +45,8 @@ const AutoTradeStats: React.FC = () => {
     }).format(value);
   };
 
-  const formatPercentage = (value: number) => {
+  const formatPercentage = (value?: number) => {
+    if (typeof value !== 'number' || isNaN(value)) return 'N/A';
     return `${value.toFixed(1)}%`;
   };
 

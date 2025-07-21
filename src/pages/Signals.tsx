@@ -1,3 +1,4 @@
+import { Grid } from '@mui/material';
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -47,7 +48,6 @@ import {
   Analytics,
   AutoAwesome,
 } from '@mui/icons-material';
-import { Grid } from '@mui/system';
 import { useTheme as useMuiTheme, alpha } from '@mui/material/styles';
 import { useAppSelector, useAppDispatch } from '../hooks/redux';
 import { fetchSignals, executeSignal } from '../store/slices/signalSlice';
@@ -511,20 +511,25 @@ const Signals: React.FC = () => {
 
       {/* Signals Display */}
       {viewMode === 'cards' ? (
-        <Grid container spacing={2}>
-          {sortedAndFilteredSignals.map((signal: TradingSignal) => (
-            <Grid
-  display="grid"
-  gridTemplateColumns={{
-    xs: 'repeat(1, 1fr)',
-    sm: 'repeat(2, 1fr)',
-    md: 'repeat(3, 1fr)',
-    lg: 'repeat(4, 1fr)',
-  }}
-  gap={2}
->
-  {sortedAndFilteredSignals.map((signal: TradingSignal) => (
-    <Grid key={signal.id}>
+       <Box
+        display="flex"
+        flexWrap="wrap"
+        gap={2}
+        justifyContent="flex-start"
+       >
+        {sortedAndFilteredSignals.map((signal: TradingSignal) => (
+          <Box
+            key={signal.id}
+             sx={{
+              flexBasis: {
+               xs: '100%',
+               sm: '48%',
+               md: '31%',
+               lg: '23%',
+             },
+            flexGrow: 1,
+              }}
+    >
       <SignalCard
         signal={signal}
         onExecute={handleSignalClick}
@@ -532,12 +537,10 @@ const Signals: React.FC = () => {
         isFavorite={favoriteSignals.includes(signal.id)}
         showDetails={false}
       />
-    </Grid>
+    </Box>
   ))}
-</Grid>
+</Box>
 
-          ))}
-        </Grid>
       ) : (
         <TableContainer component={Paper}>
           <Table>

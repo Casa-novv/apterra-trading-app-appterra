@@ -11,8 +11,8 @@ import {
   Collapse,
   Divider,
   useTheme,
+  Grid,
 } from '@mui/material';
-import Grid from '@mui/material/Grid';
 import {
   TrendingUp,
   TrendingDown,
@@ -107,7 +107,6 @@ const SignalCard: React.FC<SignalCardProps> = ({
         overflow: 'visible',
       }}
     >
-      {/* Enterprise ML Badge */}
       {isEnterpriseML && (
         <Box
           sx={{
@@ -129,7 +128,6 @@ const SignalCard: React.FC<SignalCardProps> = ({
       )}
 
       <CardContent sx={{ p: compact ? 1.5 : 2 }}>
-        {/* Header */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
           <Box>
             <Typography variant="h6" component="div" sx={{ fontWeight: 'bold' }}>
@@ -139,7 +137,7 @@ const SignalCard: React.FC<SignalCardProps> = ({
               {signal.market.toUpperCase()} • {signal.timeframe}
             </Typography>
           </Box>
-          
+
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             {onFavorite && (
               <IconButton
@@ -160,7 +158,6 @@ const SignalCard: React.FC<SignalCardProps> = ({
           </Box>
         </Box>
 
-        {/* Signal Type and Confidence */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
           <Chip
             label={signal.type}
@@ -192,7 +189,6 @@ const SignalCard: React.FC<SignalCardProps> = ({
           />
         </Box>
 
-        {/* Confidence Bar */}
         <Box sx={{ mb: 1.5 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
             <Typography variant="caption" color="text.secondary">
@@ -216,7 +212,6 @@ const SignalCard: React.FC<SignalCardProps> = ({
           />
         </Box>
 
-        {/* Price Information */}
         <Grid container spacing={1} sx={{ mb: 1.5 }}>
           <Grid size={{ xs: 4 }}>
             <Typography variant="caption" color="text.secondary" display="block">
@@ -244,21 +239,17 @@ const SignalCard: React.FC<SignalCardProps> = ({
           </Grid>
         </Grid>
 
-        {/* Description */}
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
           {signal.description}
         </Typography>
 
-        {/* Timestamp */}
         <Typography variant="caption" color="text.secondary">
           {getTimeAgo(signal.createdAt)}
         </Typography>
 
-        {/* Expandable Details */}
         <Collapse in={expanded}>
           <Divider sx={{ my: 1.5 }} />
-          
-          {/* Reasoning */}
+
           {signal.reasoning && (
             <Box sx={{ mb: 1.5 }}>
               <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
@@ -271,7 +262,6 @@ const SignalCard: React.FC<SignalCardProps> = ({
             </Box>
           )}
 
-          {/* Enterprise ML Features */}
           {isEnterpriseML && signal.featureImportance && (
             <Box sx={{ mb: 1.5 }}>
               <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
@@ -280,7 +270,7 @@ const SignalCard: React.FC<SignalCardProps> = ({
               </Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                 {Object.entries(signal.featureImportance)
-                  .sort(([,a], [,b]) => b - a)
+                  .sort(([, a], [, b]) => b - a)
                   .slice(0, 3)
                   .map(([feature, importance]) => (
                     <Chip
@@ -294,7 +284,6 @@ const SignalCard: React.FC<SignalCardProps> = ({
             </Box>
           )}
 
-          {/* Performance Metrics */}
           {signal.metadata && (
             <Box sx={{ mb: 1.5 }}>
               <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
@@ -320,7 +309,6 @@ const SignalCard: React.FC<SignalCardProps> = ({
             </Box>
           )}
 
-          {/* Execute Button */}
           {onExecute && signal.status === 'active' && (
             <Box sx={{ mt: 2 }}>
               <Tooltip title="Execute this signal">
