@@ -68,7 +68,17 @@ const AppContent: React.FC = () => {
     onSignalReceived: (signal) => {
       console.log('🎯 Signal received in App:', signal);
       // Cache the signal for performance
-      signalCacheService.cacheSignal(signal);
+      signalCacheService.cacheSignal({
+        ...signal,
+        market: (
+          signal.market === 'forex' ||
+          signal.market === 'crypto' ||
+          signal.market === 'stocks' ||
+          signal.market === 'commodities'
+            ? signal.market
+            : 'crypto' // or a default value
+        ) as 'forex' | 'crypto' | 'stocks' | 'commodities',
+      });
     },
     onPortfolioUpdate: (data) => {
       console.log('💰 Portfolio update received in App:', data);

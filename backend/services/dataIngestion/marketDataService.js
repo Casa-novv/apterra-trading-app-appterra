@@ -1,5 +1,4 @@
 const WebSocket = require('ws');
-const Redis = require('ioredis');
 const axios = require('axios');
 const EventEmitter = require('events');
 
@@ -16,13 +15,7 @@ class MarketDataIngestionService extends EventEmitter {
   constructor() {
     super();
     
-    this.redis = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: process.env.REDIS_PORT || 6379,
-      password: process.env.REDIS_PASSWORD,
-      retryDelayOnFailover: 100,
-      maxRetriesPerRequest: 3
-    });
+    const redis = require('../redisClient'); // or the correct path to your new Upstash client
     
     this.websocketConnections = new Map();
     this.fallbackPolling = new Map();
@@ -47,7 +40,8 @@ class MarketDataIngestionService extends EventEmitter {
       console.log('🚀 Initializing Market Data Ingestion Service...');
       
       // Test Redis connection
-      await this.redis.ping();
+      const redis = require('../redisClient'); // or the correct path to your new Upstash client
+      await redis.ping();
       console.log('✅ Redis connection established');
       
       // Initialize Redis TimeSeries

@@ -1,4 +1,4 @@
-const Redis = require('ioredis');
+const redis = require('../redisClient');;
 
 /**
  * Redis TimeSeries Service

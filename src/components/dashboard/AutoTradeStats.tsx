@@ -4,7 +4,6 @@ import {
   CardContent,
   Typography,
   Box,
-  Grid,
   Chip,
   LinearProgress,
   Tooltip,
@@ -19,13 +18,14 @@ import {
   CheckCircle,
   Info,
 } from '@mui/icons-material';
+import Grid from '@mui/material/Grid';
 import { useAppSelector } from '../../hooks/redux';
-import { selectAutoTradeStats } from '../../store/slices/portfolioSlice';
+import { selectPortfolioStats } from '../../store/slices/portfolioSlice';
 import autoTradeService from '../../services/autoTradeService';
 
 const AutoTradeStats: React.FC = () => {
-  const stats = useAppSelector(selectAutoTradeStats);
-  const isEnabled = autoTradeService.isEnabled();
+  const stats = useAppSelector(selectPortfolioStats) as any; // Replace 'any' with the correct type if available
+  // Remove or comment out: const isEnabled = autoTradeService.isEnabled();
 
   const getWinRateColor = (rate: number) => {
     if (rate >= 70) return 'success';
@@ -49,7 +49,7 @@ const AutoTradeStats: React.FC = () => {
     return `${value.toFixed(1)}%`;
   };
 
-  if (!isEnabled) {
+  if (!autoTradeService.isEnabled()) {
     return (
       <Card sx={{ height: '100%', background: 'rgba(255, 193, 7, 0.1)' }}>
         <CardContent>
@@ -85,7 +85,7 @@ const AutoTradeStats: React.FC = () => {
 
         <Grid container spacing={2}>
           {/* Win Rate */}
-          <Grid item xs={6}>
+          <Grid size={{ xs: 6 }}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant="h4" color={`${getWinRateColor(stats.winRate)}.main`}>
                 {formatPercentage(stats.winRate)}
@@ -97,7 +97,7 @@ const AutoTradeStats: React.FC = () => {
           </Grid>
 
           {/* Total Trades */}
-          <Grid item xs={6}>
+          <Grid size={{ xs: 6 }}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant="h4" color="primary.main">
                 {stats.totalTrades}
@@ -109,7 +109,7 @@ const AutoTradeStats: React.FC = () => {
           </Grid>
 
           {/* Profit/Loss */}
-          <Grid item xs={12}>
+          <Grid size={{ xs: 12 }}>
             <Box sx={{ mb: 1 }}>
               <Typography variant="body2" color="text.secondary">
                 Total P&L
@@ -130,7 +130,7 @@ const AutoTradeStats: React.FC = () => {
           </Grid>
 
           {/* Daily Progress */}
-          <Grid item xs={12}>
+          <Grid size={{ xs: 12 }}>
             <Box sx={{ mb: 1 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
                 <Typography variant="body2" color="text.secondary">
@@ -149,7 +149,7 @@ const AutoTradeStats: React.FC = () => {
           </Grid>
 
           {/* Active Positions */}
-          <Grid item xs={6}>
+          <Grid size={{ xs: 6 }}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant="h6" color="info.main">
                 {stats.activePositions}
@@ -161,7 +161,7 @@ const AutoTradeStats: React.FC = () => {
           </Grid>
 
           {/* Max Positions */}
-          <Grid item xs={6}>
+          <Grid size={{ xs: 6 }}>
             <Box sx={{ textAlign: 'center' }}>
               <Typography variant="h6" color="text.secondary">
                 {stats.maxPositions}
@@ -173,7 +173,7 @@ const AutoTradeStats: React.FC = () => {
           </Grid>
 
           {/* Criteria Summary */}
-          <Grid item xs={12}>
+          <Grid size={{ xs: 12 }}>
             <Box sx={{ mt: 1 }}>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 Active Criteria

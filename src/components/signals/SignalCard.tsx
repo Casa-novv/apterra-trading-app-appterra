@@ -10,9 +10,9 @@ import {
   IconButton,
   Collapse,
   Divider,
-  Grid,
   useTheme,
 } from '@mui/material';
+import Grid from '@mui/material/Grid';
 import {
   TrendingUp,
   TrendingDown,
@@ -218,7 +218,7 @@ const SignalCard: React.FC<SignalCardProps> = ({
 
         {/* Price Information */}
         <Grid container spacing={1} sx={{ mb: 1.5 }}>
-          <Grid item xs={4}>
+          <Grid size={{ xs: 4 }}>
             <Typography variant="caption" color="text.secondary" display="block">
               Entry
             </Typography>
@@ -226,7 +226,7 @@ const SignalCard: React.FC<SignalCardProps> = ({
               ${signal.entryPrice?.toFixed(2)}
             </Typography>
           </Grid>
-          <Grid item xs={4}>
+          <Grid size={{ xs: 4 }}>
             <Typography variant="caption" color="text.secondary" display="block">
               Target
             </Typography>
@@ -234,7 +234,7 @@ const SignalCard: React.FC<SignalCardProps> = ({
               ${signal.targetPrice?.toFixed(2)}
             </Typography>
           </Grid>
-          <Grid item xs={4}>
+          <Grid size={{ xs: 4 }}>
             <Typography variant="caption" color="text.secondary" display="block">
               Stop Loss
             </Typography>
@@ -303,14 +303,14 @@ const SignalCard: React.FC<SignalCardProps> = ({
               </Typography>
               <Grid container spacing={1}>
                 {signal.metadata.processingTime && (
-                  <Grid item xs={6}>
+                  <Grid size={{ xs: 6 }}>
                     <Typography variant="caption" color="text.secondary">
                       Processing: {signal.metadata.processingTime}ms
                     </Typography>
                   </Grid>
                 )}
                 {signal.metadata.latency && (
-                  <Grid item xs={6}>
+                  <Grid size={{ xs: 6 }}>
                     <Typography variant="caption" color="text.secondary">
                       Latency: {signal.metadata.latency}ms
                     </Typography>

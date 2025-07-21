@@ -41,6 +41,7 @@ class AutoTradeService {
   private dailyTrades: number = 0;
   private dailyPnL: number = 0;
   private lastResetDate: string;
+  isEnabled: any;
 
   constructor() {
     this.criteria = this.getDefaultCriteria();
@@ -118,8 +119,6 @@ class AutoTradeService {
       type: 'info',
       title: 'Auto-Trade Settings Updated',
       message: 'Your auto-trade criteria have been updated successfully.',
-      autoHide: true,
-      duration: 3000
     }));
   }
 
@@ -289,16 +288,20 @@ class AutoTradeService {
       const positionSize = (balance * this.criteria.positionSize) / 100;
 
       // Open position
+      if (!state.auth.user?.id) throw new Error('User ID is required');
       const result = await store.dispatch(openDemoPosition({
-        symbol: signal.symbol,
-        type: signal.type,
-        quantity: positionSize / signal.entryPrice,
-        entryPrice: signal.entryPrice,
-        targetPrice: signal.targetPrice,
-        stopLoss: signal.stopLoss,
-        signalId: signal.id,
-        market: signal.market,
-        timeframe: signal.timeframe
+        userId: state.auth.user.id,
+        signal: {
+          symbol: signal.symbol,
+          type: signal.type,
+          quantity: positionSize / signal.entryPrice,
+          entryPrice: signal.entryPrice,
+          targetPrice: signal.targetPrice,
+          stopLoss: signal.stopLoss,
+          signalId: signal.id,
+          market: signal.market,
+          timeframe: signal.timeframe
+        }
       }));
 
       if (result.meta.requestStatus === 'fulfilled') {
@@ -322,13 +325,13 @@ class AutoTradeService {
       } else {
         throw new Error('Failed to open position');
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('❌ Auto-trade error:', error);
       
       store.dispatch(add({
         type: 'error',
         title: 'Auto-Trade Error',
-        message: `Failed to open position for ${signal.symbol}: ${error.message}`,
+        message: `Failed to open position for ${signal.symbol}: ${error instanceof Error ? error.message : String(error)}`,
         persistent: false,
       }));
       

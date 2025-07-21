@@ -29,8 +29,8 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     if (isAuthenticated) {
-      dispatch(fetchSignals());
-      dispatch(fetchPortfolio());
+      dispatch(fetchSignals({}) as any); // Typecast to any to satisfy dispatch
+      dispatch(fetchPortfolio('') as any); // Typecast to any to satisfy dispatch
     }
   }, [dispatch, isAuthenticated]);
 
@@ -38,8 +38,14 @@ const Dashboard: React.FC = () => {
   const enterpriseSignals = signals.filter((signal) => signal.source === 'enterprise_ml');
   const highConfidenceSignals = signals.filter((signal) => signal.confidence >= 85);
 
-  const totalValue = portfolio.reduce((sum, position) => sum + position.currentValue, 0);
-  const totalProfitLoss = portfolio.reduce((sum, position) => sum + position.profitLoss, 0);
+  const totalValue = portfolio.reduce(
+    (sum: number, position: { currentValue: number }) => sum + position.currentValue,
+    0
+  );
+  const totalProfitLoss = portfolio.reduce(
+    (sum: number, position: { profitLoss: number }) => sum + position.profitLoss,
+    0
+  );
   const profitLossPercentage = totalValue > 0 ? (totalProfitLoss / totalValue) * 100 : 0;
 
   return (
@@ -56,7 +62,7 @@ const Dashboard: React.FC = () => {
 
       {/* Key Metrics */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card sx={{ height: '100%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
             <CardContent>
               <Typography variant="h4" color="white" sx={{ fontWeight: 'bold' }}>
@@ -68,7 +74,7 @@ const Dashboard: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card sx={{ 
             height: '100%', 
             background: profitLossPercentage >= 0 
@@ -85,7 +91,7 @@ const Dashboard: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card sx={{ height: '100%', background: 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)' }}>
             <CardContent>
               <Typography variant="h4" color="text.primary" sx={{ fontWeight: 'bold' }}>
@@ -97,7 +103,7 @@ const Dashboard: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card sx={{ height: '100%', background: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)' }}>
             <CardContent>
               <Typography variant="h4" color="text.primary" sx={{ fontWeight: 'bold' }}>
@@ -114,29 +120,29 @@ const Dashboard: React.FC = () => {
       {/* Main Dashboard Content */}
       <Grid container spacing={3}>
         {/* Performance Chart */}
-        <Grid item xs={12} lg={8}>
+        <Grid size={{ xs: 12, lg: 8 }}>
           <Card sx={{ height: 400 }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 Portfolio Performance
               </Typography>
-              <PerformanceChart />
+              <PerformanceChart timeframe="1M" height={300} />
             </CardContent>
           </Card>
         </Grid>
 
         {/* Auto-Trade Stats */}
-        <Grid item xs={12} lg={4}>
+        <Grid size={{ xs: 12, lg: 4 }}>
           <AutoTradeStats />
         </Grid>
 
         {/* Enterprise ML Insights */}
-        <Grid item xs={12} lg={6}>
+        <Grid size={{ xs: 12, lg: 6 }}>
           <EnterpriseMLInsights />
         </Grid>
 
         {/* Recent Activity */}
-        <Grid item xs={12} lg={6}>
+        <Grid size={{ xs: 12, lg: 6 }}>
           <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -148,14 +154,14 @@ const Dashboard: React.FC = () => {
         </Grid>
 
         {/* Signal Overview */}
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 Signal Overview
               </Typography>
               <Grid container spacing={2}>
-                <Grid item xs={12} md={4}>
+                <Grid size={{ xs: 12, md: 4 }}>
                   <Box sx={{ textAlign: 'center', p: 2 }}>
                     <Typography variant="h4" color="primary.main" sx={{ fontWeight: 'bold' }}>
                       {activeSignals.length}
@@ -165,7 +171,7 @@ const Dashboard: React.FC = () => {
                     </Typography>
                   </Box>
                 </Grid>
-                <Grid item xs={12} md={4}>
+                <Grid size={{ xs: 12, md: 4 }}>
                   <Box sx={{ textAlign: 'center', p: 2 }}>
                     <Typography variant="h4" color="success.main" sx={{ fontWeight: 'bold' }}>
                       {highConfidenceSignals.length}
@@ -175,7 +181,7 @@ const Dashboard: React.FC = () => {
                     </Typography>
                   </Box>
                 </Grid>
-                <Grid item xs={12} md={4}>
+                <Grid size={{ xs: 12, md: 4 }}>
                   <Box sx={{ textAlign: 'center', p: 2 }}>
                     <Typography variant="h4" color="info.main" sx={{ fontWeight: 'bold' }}>
                       {enterpriseSignals.length}

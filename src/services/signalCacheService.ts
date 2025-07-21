@@ -36,7 +36,7 @@ class SignalCacheService {
     const expiredKeys: string[] = [];
 
     // Find expired entries
-    for (const [key, cached] of this.cache.entries()) {
+    for (const [key, cached] of Array.from(this.cache.entries())) {
       if (now - cached.timestamp > this.ttl) {
         expiredKeys.push(key);
       }
@@ -113,7 +113,7 @@ class SignalCacheService {
     let totalAccessCount = 0;
     let avgAccessCount = 0;
 
-    for (const cached of this.cache.values()) {
+    for (const cached of Array.from(this.cache.values())) {
       if (now - cached.timestamp > this.ttl) {
         expiredEntries++;
       }
@@ -138,7 +138,7 @@ class SignalCacheService {
   private getMemoryUsage(): number {
     // Rough estimation of memory usage
     let size = 0;
-    for (const [key, cached] of this.cache.entries()) {
+    for (const [key, cached] of Array.from(this.cache.entries())) {
       size += key.length;
       size += JSON.stringify(cached.signal).length;
       size += 24; // Timestamp, accessCount, lastAccessed
@@ -172,7 +172,7 @@ class SignalCacheService {
     const results: TradingSignal[] = [];
     const lowerQuery = query.toLowerCase();
 
-    for (const cached of this.cache.values()) {
+    for (const cached of Array.from(this.cache.values())) {
       const signal = cached.signal;
       if (
         signal.symbol.toLowerCase().includes(lowerQuery) ||
@@ -190,7 +190,7 @@ class SignalCacheService {
   public getSignalsByMarket(market: string): TradingSignal[] {
     const results: TradingSignal[] = [];
     
-    for (const cached of this.cache.values()) {
+    for (const cached of Array.from(this.cache.values())) {
       if (cached.signal.market === market) {
         results.push(cached.signal);
       }
@@ -202,7 +202,7 @@ class SignalCacheService {
   public getSignalsByConfidence(minConfidence: number): TradingSignal[] {
     const results: TradingSignal[] = [];
     
-    for (const cached of this.cache.values()) {
+    for (const cached of Array.from(this.cache.values())) {
       if (cached.signal.confidence >= minConfidence) {
         results.push(cached.signal);
       }

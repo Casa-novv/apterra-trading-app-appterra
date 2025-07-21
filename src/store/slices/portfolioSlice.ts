@@ -31,6 +31,9 @@ interface DemoAccount {
 }
 
 interface PortfolioState {
+  balance: any;
+  openPositions: any;
+  portfolio: any;
   demoAccount: DemoAccount | null;
   loading: boolean;
   error: string | null;
@@ -375,7 +378,7 @@ export const selectPortfolioStats = createSelector(
       });
     
     const avgHoldingTime = holdingTimes.length > 0 
-      ? holdingTimes.reduce((sum, time) => sum + time, 0) / holdingTimes.length 
+      ? holdingTimes.reduce((sum: number, time: number) => sum + time, 0) / holdingTimes.length 
       : 0;
 
     // Calculate today's P&L

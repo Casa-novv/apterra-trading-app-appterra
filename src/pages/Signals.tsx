@@ -27,7 +27,6 @@ import {
   DialogContent,
   DialogActions,
   Alert,
-  Grid,
   ToggleButton,
   ToggleButtonGroup,
   Badge,
@@ -48,11 +47,12 @@ import {
   Analytics,
   AutoAwesome,
 } from '@mui/icons-material';
+import { Grid } from '@mui/system';
 import { useTheme as useMuiTheme, alpha } from '@mui/material/styles';
 import { useAppSelector, useAppDispatch } from '../hooks/redux';
 import { fetchSignals, executeSignal } from '../store/slices/signalSlice';
 import { openDemoPosition } from '../store/slices/portfolioSlice';
-import { useWebSocket } from '../hooks/useWebSocket';
+import useWebSocket from '../hooks/useWebSocket';
 import SignalCard from '../components/signals/SignalCard';
 import { TradingSignal } from '../types';
 import axios from 'axios';
@@ -98,12 +98,7 @@ const Signals: React.FC = () => {
   });
 
   // WebSocket connection for real-time signals
-  const { isConnected } = useWebSocket({
-    onSignalReceived: (signal: TradingSignal) => {
-      console.log('🎯 Real-time signal received:', signal);
-      // Signal is automatically added to Redux store via WebSocket hook
-    },
-  });
+  const { isConnected } = useWebSocket();
 
   useEffect(() => {
     // Initial fetch
@@ -342,7 +337,7 @@ const Signals: React.FC = () => {
       {/* Filters and Controls */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} md={3}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <TextField
               fullWidth
               label="Search signals..."
@@ -351,7 +346,7 @@ const Signals: React.FC = () => {
               size="small"
             />
           </Grid>
-          <Grid item xs={6} md={1.5}>
+          <Grid size={{ xs: 6, md: 1.5 }}>
             <FormControl fullWidth size="small">
               <InputLabel>Market</InputLabel>
               <Select
@@ -367,7 +362,7 @@ const Signals: React.FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={6} md={1.5}>
+          <Grid size={{ xs: 6, md: 1.5 }}>
             <FormControl fullWidth size="small">
               <InputLabel>Type</InputLabel>
               <Select
@@ -382,7 +377,7 @@ const Signals: React.FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={6} md={1.5}>
+          <Grid size={{ xs: 6, md: 1.5 }}>
             <FormControl fullWidth size="small">
               <InputLabel>Confidence</InputLabel>
               <Select
@@ -393,11 +388,11 @@ const Signals: React.FC = () => {
                 <MenuItem value="all">All Levels</MenuItem>
                 <MenuItem value="high">High (80%+)</MenuItem>
                 <MenuItem value="medium">Medium (60-79%)</MenuItem>
-                <MenuItem value="low">Low (<60%)</MenuItem>
+                <MenuItem value="low">Low ({'<'}60%)</MenuItem>
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={6} md={1.5}>
+          <Grid size={{ xs: 6, md: 1.5 }}>
             <FormControl fullWidth size="small">
               <InputLabel>Source</InputLabel>
               <Select
@@ -412,7 +407,7 @@ const Signals: React.FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={6} md={1.5}>
+          <Grid size={{ xs: 6, md: 1.5 }}>
             <FormControl fullWidth size="small">
               <InputLabel>Risk</InputLabel>
               <Select
@@ -427,7 +422,7 @@ const Signals: React.FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={6} md={1.5}>
+          <Grid size={{ xs: 6, md: 1.5 }}>
             <FormControl fullWidth size="small">
               <InputLabel>Timeframe</InputLabel>
               <Select
@@ -518,15 +513,29 @@ const Signals: React.FC = () => {
       {viewMode === 'cards' ? (
         <Grid container spacing={2}>
           {sortedAndFilteredSignals.map((signal: TradingSignal) => (
-            <Grid item xs={12} sm={6} md={4} lg={3} key={signal.id}>
-              <SignalCard
-                signal={signal}
-                onExecute={handleSignalClick}
-                onFavorite={toggleFavorite}
-                isFavorite={favoriteSignals.includes(signal.id)}
-                showDetails={false}
-              />
-            </Grid>
+            <Grid
+  display="grid"
+  gridTemplateColumns={{
+    xs: 'repeat(1, 1fr)',
+    sm: 'repeat(2, 1fr)',
+    md: 'repeat(3, 1fr)',
+    lg: 'repeat(4, 1fr)',
+  }}
+  gap={2}
+>
+  {sortedAndFilteredSignals.map((signal: TradingSignal) => (
+    <Grid key={signal.id}>
+      <SignalCard
+        signal={signal}
+        onExecute={handleSignalClick}
+        onFavorite={toggleFavorite}
+        isFavorite={favoriteSignals.includes(signal.id)}
+        showDetails={false}
+      />
+    </Grid>
+  ))}
+</Grid>
+
           ))}
         </Grid>
       ) : (
@@ -654,37 +663,37 @@ const Signals: React.FC = () => {
           {selectedSignal && (
             <Box sx={{ mt: 2 }}>
               <Grid container spacing={2}>
-                <Grid item xs={6}>
+                <Grid size={{ xs: 6 }}>
                   <Typography variant="body2" color="text.secondary">Type</Typography>
                   <Typography variant="body1" fontWeight="bold">
                     {selectedSignal.type}
                   </Typography>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={{ xs: 6 }}>
                   <Typography variant="body2" color="text.secondary">Confidence</Typography>
                   <Typography variant="body1" fontWeight="bold" color={getConfidenceColor(selectedSignal.confidence)}>
                     {selectedSignal.confidence}%
                   </Typography>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={{ xs: 6 }}>
                   <Typography variant="body2" color="text.secondary">Entry Price</Typography>
                   <Typography variant="body1" fontWeight="bold">
                     ${selectedSignal.entryPrice?.toFixed(2)}
                   </Typography>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={{ xs: 6 }}>
                   <Typography variant="body2" color="text.secondary">Target Price</Typography>
                   <Typography variant="body1" fontWeight="bold" color="success.main">
                     ${selectedSignal.targetPrice?.toFixed(2)}
                   </Typography>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={{ xs: 6 }}>
                   <Typography variant="body2" color="text.secondary">Stop Loss</Typography>
                   <Typography variant="body1" fontWeight="bold" color="error.main">
                     ${selectedSignal.stopLoss?.toFixed(2)}
                   </Typography>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={{ xs: 6 }}>
                   <Typography variant="body2" color="text.secondary">Risk Level</Typography>
                   <Chip
                     label={selectedSignal.risk}

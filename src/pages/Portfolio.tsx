@@ -62,7 +62,7 @@ import {
   selectPortfolioNotifications,
   clearNotifications,
 } from '../store/slices/portfolioSlice';
-import { useWebSocket } from '../hooks/useWebSocket';
+import useWebSocket from '../hooks/useWebSocket';
 
 const safeCurrency = (value: number | string | undefined | null): string => {
   const numValue = Number(value);
@@ -471,14 +471,14 @@ const Portfolio: React.FC = () => {
       headerName: 'Entry Price',
       width: 120,
       type: 'number',
-      valueFormatter: (params) => safeCurrency(params.value),
+      valueFormatter: (params: any) => safeCurrency(params.value),
     },
     {
       field: 'currentPrice',
       headerName: 'Current Price',
       width: 130,
       type: 'number',
-      valueFormatter: (params) => safeCurrency(params.value),
+      valueFormatter: (params: any) => safeCurrency(params.value),
       renderCell: (params) => (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Typography variant="body2">
@@ -502,21 +502,21 @@ const Portfolio: React.FC = () => {
       headerName: 'Target',
       width: 100,
       type: 'number',
-      valueFormatter: (params) => safeCurrency(params.value),
+      valueFormatter: (params: any) => safeCurrency(params.value),
     },
     {
       field: 'stopLoss',
       headerName: 'Stop Loss',
       width: 110,
       type: 'number',
-      valueFormatter: (params) => safeCurrency(params.value),
+      valueFormatter: (params: any) => safeCurrency(params.value),
     },
     {
       field: 'pnl',
       headerName: 'P&L',
       width: 120,
       type: 'number',
-      valueFormatter: (params) => safeCurrency(params.value),
+      valueFormatter: (params: any) => safeCurrency(params.value),
       renderCell: (params) => (
         <Typography
           variant="body2"
@@ -532,7 +532,7 @@ const Portfolio: React.FC = () => {
       headerName: 'P&L %',
       width: 100,
       type: 'number',
-      valueFormatter: (params) => safePercentage(params.value),
+      valueFormatter: (params: any) => safePercentage(params.value),
       renderCell: (params) => (
         <Typography
           variant="body2"
@@ -609,21 +609,21 @@ const Portfolio: React.FC = () => {
       headerName: 'Entry Price',
       width: 120,
       type: 'number',
-      valueFormatter: (params) => safeCurrency(params.value),
+      valueFormatter: (params: any) => safeCurrency(params.value),
     },
     {
       field: 'currentPrice',
       headerName: 'Exit Price',
       width: 120,
       type: 'number',
-      valueFormatter: (params) => safeCurrency(params.value),
+      valueFormatter: (params: any) => safeCurrency(params.value),
     },
     {
       field: 'pnl',
       headerName: 'P&L',
       width: 120,
       type: 'number',
-      valueFormatter: (params) => safeCurrency(params.value),
+      valueFormatter: (params: any) => safeCurrency(params.value),
       renderCell: (params) => (
         <Typography
           variant="body2"
@@ -656,13 +656,13 @@ const Portfolio: React.FC = () => {
       field: 'openedAt',
       headerName: 'Opened',
       width: 150,
-      valueFormatter: (params) => new Date(params.value).toLocaleDateString(),
+      valueFormatter: (params: { value: string | number | Date }) => new Date(params.value).toLocaleDateString(),
     },
     {
       field: 'closedAt',
       headerName: 'Closed',
       width: 150,
-      valueFormatter: (params) => new Date(params.value).toLocaleDateString(),
+      valueFormatter: (params: { value: string | number | Date }) => new Date(params.value).toLocaleDateString(),
     },
   ];
 
@@ -785,7 +785,7 @@ const Portfolio: React.FC = () => {
               {recommendations.map((rec, index) => (
                 <Alert
                   key={index}
-                  severity={rec.type}
+                  severity={rec.type as any}
                   icon={rec.icon}
                   sx={{ '& .MuiAlert-message': { fontSize: '0.875rem' } }}
                 >
@@ -892,7 +892,7 @@ const Portfolio: React.FC = () => {
 
       {/* Statistics Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Account Balance"
             value={safeCurrency(portfolioStats.balance)}
@@ -902,7 +902,7 @@ const Portfolio: React.FC = () => {
             color="primary"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Total P&L"
             value={safeCurrency(portfolioStats.totalPnL)}
@@ -912,7 +912,7 @@ const Portfolio: React.FC = () => {
             color={portfolioStats.totalPnL >= 0 ? 'success' : 'error'}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Win Rate"
             value={`${portfolioStats.successRate.toFixed(1)}%`}
@@ -920,7 +920,7 @@ const Portfolio: React.FC = () => {
             color="info"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Profit Factor"
             value={portfolioStats.profitFactor.toFixed(2)}
@@ -959,7 +959,7 @@ const Portfolio: React.FC = () => {
       {/* Main Content Grid */}
       <Grid container spacing={3}>
         {/* Open Positions */}
-        <Grid item xs={12} lg={8}>
+        <Grid size={{ xs: 12, lg: 8 }}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>
               Open Positions ({gridOpenPositionsWithPnL.length})
@@ -968,12 +968,12 @@ const Portfolio: React.FC = () => {
               <DataGrid
                 rows={gridOpenPositionsWithPnL}
                 columns={openPositionColumns}
-                pageSize={10}
-                rowsPerPageOptions={[5, 10, 25]}
-                disableSelectionOnClick
+                paginationModel={{ pageSize: 10, page: 0 }}
+                pageSizeOptions={[5, 10, 25]}
+                disableRowSelectionOnClick
                 autoHeight
-                components={{
-                  Toolbar: GridToolbar,
+                slots={{
+                  toolbar: GridToolbar,
                 }}
                 sx={{
                   '& .MuiDataGrid-cell': {
@@ -1001,12 +1001,24 @@ const Portfolio: React.FC = () => {
         </Grid>
 
         {/* Trading Recommendations */}
-        <Grid item xs={12} lg={4}>
-          <TradingRecommendations data={portfolioStats} />
+        <Grid size={{ xs: 12, lg: 4 }}>
+        <TradingRecommendations
+         data={{
+          winRate: portfolioStats.successRate,
+          profitFactor: portfolioStats.profitFactor,
+          avgWin: 0,
+          avgLoss: 0,
+          totalTrades: 0,
+          totalPnL: portfolioStats.totalPnL,
+          takeProfitHits: portfolioStats.takeProfitHits,
+          stopLossHits: portfolioStats.stopLossHits,
+          avgHoldingTime: portfolioStats.avgHoldingTime,
+  }}
+/>
         </Grid>
 
         {/* Trade History */}
-        <Grid item xs={12}>
+        <Grid size={{ xs: 12 }}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>
               Trade History ({gridClosedPositions.length})
@@ -1015,12 +1027,12 @@ const Portfolio: React.FC = () => {
               <DataGrid
                 rows={gridClosedPositions}
                 columns={closedPositionColumns}
-                pageSize={10}
-                rowsPerPageOptions={[5, 10, 25]}
-                disableSelectionOnClick
+                paginationModel={{ pageSize: 10, page: 0 }}
+                pageSizeOptions={[5, 10, 25]}
+                disableRowSelectionOnClick
                 autoHeight
-                components={{
-                  Toolbar: GridToolbar,
+                slots={{
+                  toolbar: GridToolbar,
                 }}
                 sx={{
                   '& .MuiDataGrid-cell': {
@@ -1047,7 +1059,7 @@ const Portfolio: React.FC = () => {
         </DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
                 label="Symbol"
@@ -1055,7 +1067,7 @@ const Portfolio: React.FC = () => {
                 onChange={(e) => setNewPosition({ ...newPosition, symbol: e.target.value })}
               />
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <FormControl fullWidth>
                 <InputLabel>Type</InputLabel>
                 <Select
@@ -1068,7 +1080,7 @@ const Portfolio: React.FC = () => {
                 </Select>
               </FormControl>
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
                 label="Quantity"
@@ -1077,7 +1089,7 @@ const Portfolio: React.FC = () => {
                 onChange={(e) => setNewPosition({ ...newPosition, quantity: e.target.value })}
               />
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
                 label="Entry Price"
@@ -1086,7 +1098,7 @@ const Portfolio: React.FC = () => {
                 onChange={(e) => setNewPosition({ ...newPosition, entryPrice: e.target.value })}
               />
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={{ xs: 12 }}>
               <FormControl fullWidth>
                 <InputLabel>Market</InputLabel>
                 <Select
@@ -1128,7 +1140,7 @@ const Portfolio: React.FC = () => {
       </Dialog>
 
       {/* Debug Panel */}
-      <DebugPanel />
+      <DebugPanel positions={demoAccount?.openPositions || []} />
     </Container>
   );
 };

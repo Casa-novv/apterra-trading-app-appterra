@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from './redux';
 import { addSignal, updateSignal } from '../store/slices/signalSlice';
-import { TradingSignal } from '../types';
 
 export interface WebSocketMessage {
   type: string;
@@ -183,10 +182,10 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
           
         case 'new_signal':
           // Handle enterprise ML signals
-          const signal = message.signal || message.data;
+          const signal = (message as any).signal || message.data;
           if (signal) {
             console.log('🎯 New signal received:', signal);
-            
+
             // Validate signal structure
             if (signal.symbol && signal.type && signal.confidence) {
               // Add enterprise ML specific validation
@@ -213,7 +212,7 @@ const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketReturn => 
           break;
           
         case 'update_signal':
-          const updatedSignal = message.signal || message.data;
+          const updatedSignal = (message as any).signal || message.data;
           if (updatedSignal) {
             dispatch(updateSignal(updatedSignal));
           }
@@ -484,4 +483,3 @@ export const usePortfolioUpdates = () => {
 
   return webSocket;
 };
-export {};
