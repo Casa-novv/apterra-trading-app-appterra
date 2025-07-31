@@ -1,5 +1,5 @@
 const EventEmitter = require('events');
-const LRU = require('lru-cache');
+const { LRUCache } = require('lru-cache');
 
 /**
  * Real-Time Inference Service
@@ -18,7 +18,7 @@ class RealTimeInferenceService extends EventEmitter {
     this.ensemble = null;
     this.circuitBreakers = new Map();
     this.performanceMonitor = new PerformanceMonitor();
-    this.cache = new LRU({
+    this.cache = new LRUCache({
       max: 1000,
       ttl: 1000 * 60 * 5, // 5 minutes
       updateAgeOnGet: true

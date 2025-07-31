@@ -116,7 +116,59 @@ export const openDemoPosition = createAsyncThunk(
     }
   }
 );
-// ... other thunks unchanged ...
+
+export const createDemoAccount = createAsyncThunk(
+  'portfolio/createDemoAccount',
+  async (userId: string, { rejectWithValue }) => {
+    try {
+      const response = await axios.post(`/api/demo-account/${userId}`);
+      return response.data;
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to create demo account');
+    }
+  }
+);
+
+export const resetDemoAccount = createAsyncThunk(
+  'portfolio/resetDemoAccount',
+  async (
+    payload: { userId: string; balance: number },
+    { rejectWithValue }
+  ) => {
+    const { userId, balance } = payload;
+    try {
+      const response = await axios.patch(`/api/demo-account/${userId}/reset`, { balance });
+      return response.data;
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to reset demo account');
+    }
+  }
+);
+
+
+export const closeDemoPosition = createAsyncThunk(
+  'portfolio/closeDemoPosition',
+  async ({ userId, positionId }: { userId: string; positionId: string }, { rejectWithValue }) => {
+    try {
+      const response = await axios.patch(`/api/demo-account/${userId}/positions/${positionId}/close`);
+      return response.data;
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to close demo position');
+    }
+  }
+);
+
+export const closeAllDemoPositions = createAsyncThunk(
+  'portfolio/closeAllDemoPositions',
+  async (userId: string, { rejectWithValue }) => {
+    try {
+      const response = await axios.patch(`/api/demo-account/${userId}/positions/close-all`);
+      return response.data;
+    } catch (error: any) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to close all demo positions');
+    }
+  }
+);
 
 const portfolioSlice = createSlice({
   name: 'portfolio',
@@ -185,45 +237,101 @@ export const selectPortfolioStats = createSelector(
   (demoAccount, slice) => {
     if (!demoAccount) {
       return {
-        winRate:         0,
-        totalTrades:     0,
+        winRate: 0,
+        totalTrades: 0,
         totalProfitLoss: 0,
-        tradesToday:     0,
-        maxDailyTrades:  slice.maxDailyTrades,
+        tradesToday: 0,
+        maxDailyTrades: slice.maxDailyTrades,
         activePositions: 0,
-        maxPositions:    slice.maxPositions,
-        minConfidence:   slice.minConfidence,
-        maxRisk:         slice.maxRisk,
-        maxDrawdown:     slice.maxDrawdown
+        maxPositions: slice.maxPositions,
+        minConfidence: slice.minConfidence,
+        maxRisk: slice.maxRisk,
+        maxDrawdown: slice.maxDrawdown,
+        openPositions: 0,
+        closedPositions: 0,
+        balance: slice.balance ?? 100000,
+        totalPnL: 0,
+        totalReturnPercentage: 0,
+        successRate: 0,
+        profitFactor: 0,
+        takeProfitHits: 0,
+        stopLossHits: 0,
+        avgHoldingTime: 0,
       };
     }
 
-    const openPositions   = demoAccount.openPositions || [];
+    const openPositions = demoAccount.openPositions || [];
     const closedPositions = demoAccount.tradeHistory || [];
-
     const totalWins = closedPositions.filter((p: { pnl: number }) => p.pnl > 0).length;
+    const totalLosses = closedPositions.filter((p: { pnl: number }) => p.pnl < 0).length;
     const successRate = closedPositions.length ? (totalWins / closedPositions.length) * 100 : 0;
     const totalTrades = openPositions.length + closedPositions.length;
-    const totalPnL = openPositions.reduce((sum: number, p: { pnl: number }) => sum + p.pnl, 0);
+    const totalPnL = [...openPositions, ...closedPositions].reduce((sum: number, p: { pnl: number }) => sum + (p.pnl || 0), 0);
+    const balance = demoAccount.balance ?? 100000;
+    const totalReturnPercentage = ((balance - 100000) / 100000) * 100;
+    const profitFactor = totalLosses > 0
+      ? closedPositions.filter((p: { pnl: number }) => p.pnl > 0).reduce((sum: number, p: { pnl: number }) => sum + p.pnl, 0) /
+        Math.abs(closedPositions.filter((p: { pnl: number }) => p.pnl < 0).reduce((sum: number, p: { pnl: number }) => sum + p.pnl, 0))
+      : 0;
+    const takeProfitHits = closedPositions.filter((p: { closureType?: string }) => p.closureType === 'take_profit_hit').length;
+    const stopLossHits = closedPositions.filter((p: { closureType?: string }) => p.closureType === 'stop_loss_hit').length;
+    const avgHoldingTime = closedPositions.length
+      ? closedPositions.reduce((sum: number, p: { openedAt: string, closedAt?: string }) => {
+          if (p.openedAt && p.closedAt) {
+            return sum + (new Date(p.closedAt).getTime() - new Date(p.openedAt).getTime());
+          }
+          return sum;
+        }, 0) / closedPositions.length / (1000 * 60 * 60) // in hours
+      : 0;
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tradesToday = closedPositions.filter((p: { openedAt: string }) => new Date(p.openedAt) >= today).length;
 
     return {
-      winRate:         successRate,
+      winRate: successRate,
       totalTrades,
       totalProfitLoss: totalPnL,
       tradesToday,
-      maxDailyTrades:  slice.maxDailyTrades,
+      maxDailyTrades: slice.maxDailyTrades,
       activePositions: openPositions.length,
-      maxPositions:    slice.maxPositions,
-      minConfidence:   slice.minConfidence,
-      maxRisk:         slice.maxRisk,
-      maxDrawdown:     slice.maxDrawdown
+      maxPositions: slice.maxPositions,
+      minConfidence: slice.minConfidence,
+      maxRisk: slice.maxRisk,
+      maxDrawdown: slice.maxDrawdown,
+      openPositions: openPositions.length,
+      closedPositions: closedPositions.length,
+      balance,
+      totalPnL,
+      totalReturnPercentage,
+      successRate,
+      profitFactor,
+      takeProfitHits,
+      stopLossHits,
+      avgHoldingTime,
     };
   }
 );
+
+export const selectPositionsNearTakeProfit = (state: any) => {
+  const demoAccount = state.portfolio.demoAccount;
+  if (!demoAccount) return [];
+  // Example: positions within 2% of targetPrice
+  return (demoAccount.openPositions || []).filter((p: any) =>
+    p.targetPrice && Math.abs((p.currentPrice - p.targetPrice) / p.targetPrice) < 0.02
+  );
+};
+
+export const selectPositionsNearStopLoss = (state: any) => {
+  const demoAccount = state.portfolio.demoAccount;
+  if (!demoAccount) return [];
+  // Example: positions within 2% of stopLoss
+  return (demoAccount.openPositions || []).filter((p: any) =>
+    p.stopLoss && Math.abs((p.currentPrice - p.stopLoss) / p.stopLoss) < 0.02
+  );
+};
+
+export const selectPortfolioNotifications = (state: any) => state.portfolio.notifications;
 
 export const { updatePortfolio, clearPortfolio, updatePosition, positionClosed, autoPositionClosed, startPositionMonitoring, stopPositionMonitoring, updatePositionMonitoring, clearNotifications } = portfolioSlice.actions;
 export default portfolioSlice.reducer;

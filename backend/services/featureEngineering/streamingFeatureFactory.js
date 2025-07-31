@@ -151,6 +151,8 @@ class StreamingFeatureFactory extends EventEmitter {
     for (const category of Object.keys(this.categories)) {
       this.featureCache.set(category, new Map());
     }
+    // Add a 'recent' cache for storing recent feature vectors
+    this.featureCache.set('recent', new Map());
   }
 
   async processTick(symbol, tick) {

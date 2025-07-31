@@ -1,4 +1,6 @@
-const tf = require('@tensorflow/tfjs');
+// backend/services/ml/ensembleSystem.js (at the very top)
+const tf = require('@tensorflow/tfjs'); // Make sure tf is imported if not already
+require('@tensorflow/tfjs-node'); // This enables the faster backend
 const EventEmitter = require('events');
 
 /**
@@ -553,11 +555,13 @@ class DeepSequenceEngine {
         ]
       });
       
-      // Attention model (simplified)
+      // Attention model (simplified) - using standard layers instead of multiHeadAttention
       this.attention = tf.sequential({
         layers: [
-          tf.layers.dense({ units: 64, activation: 'relu', inputShape: [100] }),
-          tf.layers.attention({ units: 32 }),
+          tf.layers.dense({ units: 64, activation: 'relu', inputShape: [5000] }), // 100 * 50 = 5000
+          tf.layers.dropout({ rate: 0.3 }),
+          tf.layers.dense({ units: 32, activation: 'relu' }),
+          tf.layers.dropout({ rate: 0.3 }),
           tf.layers.dense({ units: 16, activation: 'relu' }),
           tf.layers.dense({ units: 3, activation: 'softmax' })
         ]
@@ -628,7 +632,18 @@ class DeepSequenceEngine {
   }
 
   async generatePrediction(model, sequenceData) {
-    const inputTensor = tf.tensor3d([sequenceData], [1, 100, 50]);
+    let inputTensor;
+    
+    // Check if this is the attention model (expects 2D input)
+    if (model === this.attention) {
+      // Flatten sequence data for attention model
+      const flattenedData = sequenceData.flat();
+      inputTensor = tf.tensor2d([flattenedData], [1, 100 * 50]);
+    } else {
+      // Use 3D tensor for LSTM and TCN models
+      inputTensor = tf.tensor3d([sequenceData], [1, 100, 50]);
+    }
+    
     const prediction = model.predict(inputTensor);
     const predictionData = prediction.dataSync();
     
